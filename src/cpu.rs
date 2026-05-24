@@ -135,8 +135,4 @@ impl CpuMonitor {
     pub fn get_overall_usage(&self) -> f32 {
         self.overall_usage
     }
-
-    pub fn get_core_usages(&self) -> Vec<f32> {
-        self.core_usages.clone()
-    }
 }

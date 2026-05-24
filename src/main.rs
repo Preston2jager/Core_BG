@@ -286,7 +286,6 @@ fn main() {
 
     app.cpu_monitor.refresh();
     let mut overall_cpu = app.cpu_monitor.get_overall_usage();
-    let mut core_usages = app.cpu_monitor.get_core_usages();
 
     log_msg("Entering event loop");
 
@@ -352,7 +351,6 @@ fn main() {
             if now.duration_since(last_cpu_poll) >= std::time::Duration::from_secs(1) {
                 app.cpu_monitor.refresh();
                 overall_cpu = app.cpu_monitor.get_overall_usage();
-                core_usages = app.cpu_monitor.get_core_usages();
                 last_cpu_poll = now;
 
                 // Monitor check logic
@@ -387,7 +385,7 @@ fn main() {
                 }
             }
 
-            app.update_and_draw(delta_time, overall_cpu, &core_usages, glow);
+            app.update_and_draw(delta_time, overall_cpu, glow);
 
             if now.duration_since(log_timer) >= std::time::Duration::from_secs(5) {
                 if !app.monitor_states.is_empty() {

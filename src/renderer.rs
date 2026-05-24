@@ -389,14 +389,30 @@ fn load_wallpaper() -> (u32, u32, Vec<u8>) {
     (1, 1, vec![0, 0, 0, 255])
 }
 
+pub fn generate_star_logo() -> Vec<u8> {
+    let mut buf = vec![0u8; 512 * 512 * 4];
+    for y in 0..512 {
+        let y_f = (y as f32 - 256.0) / 256.0;
+        for x in 0..512 {
+            let x_f = (x as f32 - 256.0) / 256.0;
+            let d = (x_f*x_f + y_f*y_f).sqrt();
+            let angle = y_f.atan2(x_f);
+            let star_factor = 0.5 + 0.3 * (angle * 4.0).cos().abs();
+            let val = (-((d - star_factor * 0.4) / 0.08).powi(2)).exp();
+            let idx = (y * 512 + x) * 4;
+            buf[idx] = 255; buf[idx+1] = 255; buf[idx+2] = 255;
+            buf[idx+3] = (val * 255.0).clamp(0.0, 255.0) as u8;
+        }
+    }
+    buf
+}
+
 pub struct SharedRenderResources {
     pub render_pipeline: wgpu::RenderPipeline,
     pub bind_group_layout: wgpu::BindGroupLayout,
-    #[allow(dead_code)]
     pub logo_texture: wgpu::Texture,
     pub logo_view: wgpu::TextureView,
     pub logo_sampler: wgpu::Sampler,
-    #[allow(dead_code)]
     pub wallpaper_texture: wgpu::Texture,
     pub wallpaper_view: wgpu::TextureView,
     pub wallpaper_sampler: wgpu::Sampler,
@@ -409,204 +425,81 @@ impl SharedRenderResources {
             source: wgpu::ShaderSource::Wgsl(SHADER_SRC.into()),
         });
 
-        // Generate the default Star logo procedurally to prevent logo reset issues
-        let mut buf = vec![0u8; 512 * 512 * 4];
-        for y in 0..512 {
-            for x in 0..512 {
-                let dx = (x as f32 - 256.0) / 256.0;
-                let dy = (y as f32 - 256.0) / 256.0;
-                let d = (dx*dx + dy*dy).sqrt();
-                let angle = dy.atan2(dx);
-                let star_factor = 0.5 + 0.3 * (angle * 4.0).cos().abs();
-                let val = (-((d - star_factor * 0.4) / 0.08).powi(2)).exp();
-                let alpha = (val * 255.0).clamp(0.0, 255.0) as u8;
-                let idx = (y * 512 + x) * 4;
-                buf[idx] = 255;
-                buf[idx+1] = 255;
-                buf[idx+2] = 255;
-                buf[idx+3] = alpha;
-            }
-        }
-        let rgba_data = buf;
-
-        let texture_size = wgpu::Extent3d {
-            width: 512,
-            height: 512,
-            depth_or_array_layers: 1,
-        };
+        let logo_rgba = generate_star_logo();
+        let texture_size = wgpu::Extent3d { width: 512, height: 512, depth_or_array_layers: 1 };
         let logo_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("logo_texture"),
-            size: texture_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            label: Some("logo_texture"), size: texture_size, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb, usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[],
         });
 
         queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &logo_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &rgba_data,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * 512),
-                rows_per_image: Some(512),
-            },
-            texture_size,
+            wgpu::ImageCopyTexture { texture: &logo_texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &logo_rgba, wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(4 * 512), rows_per_image: Some(512) }, texture_size,
         );
 
         let logo_view = logo_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let logo_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
+            address_mode_u: wgpu::AddressMode::ClampToEdge, address_mode_v: wgpu::AddressMode::ClampToEdge, address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, mipmap_filter: wgpu::FilterMode::Nearest, ..Default::default()
         });
 
-        // Load wallpaper
         let (wp_w, wp_h, wp_rgba) = load_wallpaper();
-
-        let wp_size = wgpu::Extent3d {
-            width: wp_w,
-            height: wp_h,
-            depth_or_array_layers: 1,
-        };
+        let wp_size = wgpu::Extent3d { width: wp_w, height: wp_h, depth_or_array_layers: 1 };
         let wallpaper_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("wallpaper_texture"),
-            size: wp_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            label: Some("wallpaper_texture"), size: wp_size, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb, usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[],
         });
         queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &wallpaper_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &wp_rgba,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * wp_w),
-                rows_per_image: Some(wp_h),
-            },
-            wp_size,
+            wgpu::ImageCopyTexture { texture: &wallpaper_texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &wp_rgba, wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(4 * wp_w), rows_per_image: Some(wp_h) }, wp_size,
         );
         let wallpaper_view = wallpaper_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let wallpaper_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
-            anisotropy_clamp: 16, 
-            ..Default::default()
+            address_mode_u: wgpu::AddressMode::ClampToEdge, address_mode_v: wgpu::AddressMode::ClampToEdge, address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, mipmap_filter: wgpu::FilterMode::Linear, anisotropy_clamp: 16, ..Default::default()
         });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Shared Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+                    binding: 0, visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
+                    binding: 1, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    binding: 2, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
+                    binding: 3, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                    binding: 4, visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None,
                 },
             ],
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Shared Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            label: Some("Shared Pipeline Layout"), bind_group_layouts: &[&bind_group_layout], push_constant_ranges: &[],
         });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Shared Render Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                compilation_options: Default::default(),
-                buffers: &[GpuInstance::desc()],
-            },
+            label: Some("Shared Render Pipeline"), layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState { module: &shader, entry_point: "vs_main", compilation_options: Default::default(), buffers: &[GpuInstance::desc()] },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                module: &shader, entry_point: "fs_main", compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
             }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
+            primitive: wgpu::PrimitiveState::default(), depth_stencil: None, multisample: wgpu::MultisampleState::default(), multiview: None, cache: None,
         });
 
-        Self {
-            render_pipeline,
-            bind_group_layout,
-            logo_texture,
-            logo_view,
-            logo_sampler,
-            wallpaper_texture,
-            wallpaper_view,
-            wallpaper_sampler,
-        }
+        Self { render_pipeline, bind_group_layout, logo_texture, logo_view, logo_sampler, wallpaper_texture, wallpaper_view, wallpaper_sampler }
     }
 }
 
@@ -632,6 +525,9 @@ pub struct Renderer {
     pub dcomp_visual: windows::Win32::Graphics::DirectComposition::IDCompositionVisual,
     pub win_w: f32,
     pub win_h: f32,
+
+    // Cached wallpaper mapping
+    pub wp_offset_scale: [f32; 4], // [offset_x, offset_y, scale_x, scale_y]
 
     // Per-core twinkling state
     pub core_flicker_timers: [f32; NUM_CORES],
@@ -717,58 +613,54 @@ impl Renderer {
             label: None,
             layout: &shared_resources.bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&shared_resources.logo_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&shared_resources.logo_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&shared_resources.wallpaper_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&shared_resources.wallpaper_sampler),
-                },
+                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shared_resources.logo_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shared_resources.logo_sampler) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&shared_resources.wallpaper_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&shared_resources.wallpaper_sampler) },
             ],
         });
 
-        let core_flicker_timers = [0.0; NUM_CORES];
-        let core_flicker_durations = [1.0; NUM_CORES];
-        let core_flicker_targets = [[0.0; 4]; NUM_CORES];
-        let core_colors = [[0.0; 4]; NUM_CORES];
-
-        Self {
+        let mut renderer = Self {
             width: render_w, height: render_h, smoothed_load: 0.0, time: 0.0, config_glow: 1, 
-            particles: Vec::new(), core_angles, core_configs,
+            particles: Vec::with_capacity(4000), core_angles, core_configs,
             surface, surface_config, instance_buffer, uniform_buffer, uniform_bind_group,
             shared_resources,
-            dcomp_device,
-            dcomp_target,
-            dcomp_visual,
-            win_w,
-            win_h,
-            core_flicker_timers,
-            core_flicker_durations,
-            core_flicker_targets,
-            core_colors,
-        }
+            dcomp_device, dcomp_target, dcomp_visual,
+            win_w, win_h,
+            wp_offset_scale: [0.0; 4],
+            core_flicker_timers: [0.0; NUM_CORES],
+            core_flicker_durations: [1.0; NUM_CORES],
+            core_flicker_targets: [[0.0; 4]; NUM_CORES],
+            core_colors: [[0.0; 4]; NUM_CORES],
+        };
+        renderer.update_wp_mapping();
+        renderer
+    }
+
+    fn update_wp_mapping(&mut self) {
+        let (tex_w, tex_h) = (self.shared_resources.wallpaper_texture.width() as f32, self.shared_resources.wallpaper_texture.height() as f32);
+        let screen_aspect = self.win_w / self.win_h;
+        let tex_aspect = tex_w / tex_h;
+        
+        let (scale_x, scale_y, off_x, off_y) = if tex_aspect > screen_aspect {
+            let s_x = (tex_h * screen_aspect) / tex_w;
+            (s_x, 1.0, (1.0 - s_x) * 0.5, 0.0)
+        } else {
+            let s_y = (tex_w / screen_aspect) / tex_h;
+            (1.0, s_y, 0.0, (1.0 - s_y) * 0.5)
+        };
+        self.wp_offset_scale = [off_x, off_y, scale_x, scale_y];
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, width: usize, height: usize) {
-        if width == 0 || height == 0 { return; }
-        if self.width == width && self.height == height { return; }
+        if width == 0 || height == 0 || (self.width == width && self.height == height) { return; }
         self.width = width; self.height = height;
+        self.win_w = width as f32; self.win_h = height as f32;
         self.surface_config.width = width as u32;
         self.surface_config.height = height as u32;
         self.surface.configure(device, &self.surface_config);
+        self.update_wp_mapping();
     }
 
     pub fn recreate_bind_group(&mut self, device: &wgpu::Device) {
@@ -800,28 +692,26 @@ impl Renderer {
         });
     }
 
-    pub fn update(&mut self, delta_time: f32, overall_cpu: f32, _core_usages: &[f32], color_preset: crate::app::ColorPreset) {
+    pub fn update(&mut self, delta_time: f32, overall_cpu: f32, color_preset: crate::app::ColorPreset) {
         self.time += delta_time;
         let mut rng = rand::thread_rng();
-        let lerp = (delta_time * 2.0).min(1.0);
-        self.smoothed_load = self.smoothed_load + (overall_cpu - self.smoothed_load) * lerp;
-        let load_f = self.smoothed_load / 100.0;
+        
+        // Use a more aggressive smoothing for load if necessary, but 2.0 is usually smooth enough
+        self.smoothed_load += (overall_cpu - self.smoothed_load) * (delta_time * 2.0).min(1.0);
+        let load_f = self.smoothed_load * 0.01;
  
         let speed = 0.3 + load_f.powf(1.5) * 8.0;
         for angle in &mut self.core_angles { *angle += speed * delta_time; }
  
         let scale = (self.height as f32 / 1080.0).max(0.2);
-        let base_r = (60.0 + (150.0 - 60.0) * load_f) * scale;
+        let base_r = (60.0 + 90.0 * load_f) * scale;
         
         let palette = get_palette(color_preset);
 
         // Update core colors and twinkling states
         for i in 0..NUM_CORES {
             if self.core_flicker_timers[i] > 0.0 {
-                self.core_flicker_timers[i] -= delta_time;
-                if self.core_flicker_timers[i] < 0.0 {
-                    self.core_flicker_timers[i] = 0.0;
-                }
+                self.core_flicker_timers[i] = (self.core_flicker_timers[i] - delta_time).max(0.0);
             }
 
             if self.core_flicker_timers[i] == 0.0 {
@@ -831,24 +721,13 @@ impl Renderer {
                         palette.color_b
                     } else if load_f < 0.8 {
                         let t = (load_f - 0.5) / 0.3;
-                        let p_c = 0.4 * t;
-                        if rng.gen::<f32>() < p_c {
-                            palette.color_c
-                        } else {
-                            palette.color_b
-                        }
+                        if rng.gen::<f32>() < 0.4 * t { palette.color_c } else { palette.color_b }
                     } else {
                         let t = (load_f - 0.8) / 0.2;
                         let p_b = 0.6 - 0.267 * t;
                         let p_c = 0.4 - 0.067 * t;
                         let r = rng.gen::<f32>();
-                        if r < p_b {
-                            palette.color_b
-                        } else if r < p_b + p_c {
-                            palette.color_c
-                        } else {
-                            palette.color_d
-                        }
+                        if r < p_b { palette.color_b } else if r < p_b + p_c { palette.color_c } else { palette.color_d }
                     };
                     let duration = rng.gen_range(0.25..0.45);
                     self.core_flicker_timers[i] = duration;
@@ -866,121 +745,86 @@ impl Renderer {
             };
         }
         
+        let logo_rgb = get_logo_color(color_preset, load_f);
+        let spark_color = [logo_rgb[0], logo_rgb[1], logo_rgb[2], 1.0];
+
         // Spawn persistent tails and load-conditioned spontaneous sparks
         for i in 0..NUM_CORES {
             let angle = self.core_angles[i];
-            let prev_angle = angle - speed * delta_time;
             let cfg = &self.core_configs[i];
             let r_orbit = base_r * cfg.orbit_mult;
-            let current_core_color = self.core_colors[i];
             
-            // 1. TAIL: Interpolated flame trail matching core's movement direction
+            // 1. TAIL
             let num_steps = if load_f > 0.5 { 4 } else if load_f > 0.2 { 2 } else { 1 };
-            
-            // Core's orbital direction vector at this moment
             let (sin_a, cos_a) = angle.sin_cos();
             let tangent = [
                 -sin_a * cfg.u[0] + cos_a * cfg.v[0],
                 -sin_a * cfg.u[1] + cos_a * cfg.v[1],
                 -sin_a * cfg.u[2] + cos_a * cfg.v[2],
             ];
-            // Movement vector (opposite to tail direction)
-            let core_vel_mag = speed * r_orbit;
-            let mv = [tangent[0] * core_vel_mag, tangent[1] * core_vel_mag, tangent[2] * core_vel_mag];
+            let mv = [tangent[0] * speed * r_orbit, tangent[1] * speed * r_orbit, tangent[2] * speed * r_orbit];
             
+            let prev_angle = angle - speed * delta_time;
             for step in 0..num_steps {
                 let t_step = step as f32 / num_steps as f32;
-                let interpolated_angle = prev_angle + (angle - prev_angle) * t_step;
-                let (sin_ia, cos_ia) = interpolated_angle.sin_cos();
-                let px = r_orbit * (cos_ia * cfg.u[0] + sin_ia * cfg.v[0]);
-                let py = r_orbit * (cos_ia * cfg.u[1] + sin_ia * cfg.v[1]);
-                let pz = r_orbit * (cos_ia * cfg.u[2] + sin_ia * cfg.v[2]);
+                let ia = prev_angle + (angle - prev_angle) * t_step;
+                let (s_ia, c_ia) = ia.sin_cos();
+                let px = r_orbit * (c_ia * cfg.u[0] + s_ia * cfg.v[0]);
+                let py = r_orbit * (c_ia * cfg.u[1] + s_ia * cfg.v[1]);
+                let pz = r_orbit * (c_ia * cfg.u[2] + s_ia * cfg.v[2]);
 
-                let initial_life = 0.25 + load_f * 0.25;
-                // Unstable rocket exhaust: initial velocity is opposite to core movement plus some jitter
-                let exhaust_jitter = 50.0 * scale * (1.0 + load_f);
-                let vx = -mv[0] * 0.3 + rng.gen_range(-exhaust_jitter..exhaust_jitter);
-                let vy = -mv[1] * 0.3 + rng.gen_range(-exhaust_jitter..exhaust_jitter);
-                let vz = -mv[2] * 0.3 + rng.gen_range(-exhaust_jitter..exhaust_jitter);
-
+                let life = 0.25 + load_f * 0.25;
+                let jitter = 50.0 * scale * (1.0 + load_f);
                 self.particles.push(Particle {
                     x: px, y: py, z: pz,
-                    vx, vy, vz,
-                    life: initial_life,
-                    decay: 1.0,
-                    max_life: initial_life,
-                    p_type: 0.0,
-                    color: current_core_color,
+                    vx: -mv[0] * 0.3 + rng.gen_range(-jitter..jitter),
+                    vy: -mv[1] * 0.3 + rng.gen_range(-jitter..jitter),
+                    vz: -mv[2] * 0.3 + rng.gen_range(-jitter..jitter),
+                    life, decay: 1.0, max_life: life, p_type: 0.0,
+                    color: self.core_colors[i],
                 });
             }
 
-            // 2. SPARK: Spontaneous static electric discharges matching contrast color
-            if load_f > 0.5 {
-                let spark_chance = (load_f - 0.5) * 3.0; // Doubled frequency
-                if rng.gen::<f32>() < spark_chance {
-                    let (sin_a, cos_a) = angle.sin_cos();
-                    let px = r_orbit * (cos_a * cfg.u[0] + sin_a * cfg.v[0]);
-                    let py = r_orbit * (cos_a * cfg.u[1] + sin_a * cfg.v[1]);
-                    let pz = r_orbit * (cos_a * cfg.u[2] + sin_a * cfg.v[2]);
+            // 2. SPARK
+            if load_f > 0.5 && rng.gen::<f32>() < (load_f - 0.5) * 3.0 {
+                let (s_a, c_a) = angle.sin_cos();
+                let px = r_orbit * (c_a * cfg.u[0] + s_a * cfg.v[0]);
+                let py = r_orbit * (c_a * cfg.u[1] + s_a * cfg.v[1]);
+                let pz = r_orbit * (c_a * cfg.u[2] + s_a * cfg.v[2]);
 
-                    let theta: f32 = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
-                    let z_val: f32 = rng.gen_range(-1.0..1.0);
-                    let r_xy = (1.0f32 - z_val * z_val).sqrt();
-                    let (sin_theta, cos_theta) = theta.sin_cos();
-                    let dir = [r_xy * cos_theta, r_xy * sin_theta, z_val];
-                    
-                    let mut curr_x = px;
-                    let mut curr_y = py;
-                    let mut curr_z = pz;
-                    let step_len = 10.0 * scale; 
-                    let jit = 4.0 * scale; 
-                    let life = rng.gen_range(0.05..0.15); 
-                    
-                    let logo_rgb = get_logo_color(color_preset, load_f);
-                    let spark_color = [logo_rgb[0], logo_rgb[1], logo_rgb[2], 1.0];
-                    
-                    for _ in 0..5 { // Increased steps from 3 to 5
-                        curr_x += dir[0] * step_len + rng.gen_range(-jit..jit);
-                        curr_y += dir[1] * step_len + rng.gen_range(-jit..jit);
-                        curr_z += dir[2] * step_len + rng.gen_range(-jit..jit);
-                        
-                        self.particles.push(Particle {
-                            x: curr_x, y: curr_y, z: curr_z,
-                            vx: 0.0, vy: 0.0, vz: 0.0, 
-                            life,
-                            decay: 1.0,
-                            max_life: life,
-                            p_type: 1.0,
-                            color: spark_color,
-                        });
-                    }
+                let theta: f32 = rng.gen_range(0.0..2.0 * std::f32::consts::PI);
+                let z_val: f32 = rng.gen_range(-1.0..1.0);
+                let r_xy = (1.0f32 - z_val * z_val).sqrt();
+                let (s_t, c_t) = theta.sin_cos();
+                let dir = [r_xy * c_t, r_xy * s_t, z_val];
+                
+                let (mut cx, mut cy, mut cz) = (px, py, pz);
+                let step_len = 10.0 * scale; 
+                let jit = 4.0 * scale; 
+                let life = rng.gen_range(0.05..0.15); 
+                
+                for _ in 0..5 {
+                    cx += dir[0] * step_len + rng.gen_range(-jit..jit);
+                    cy += dir[1] * step_len + rng.gen_range(-jit..jit);
+                    cz += dir[2] * step_len + rng.gen_range(-jit..jit);
+                    self.particles.push(Particle { x: cx, y: cy, z: cz, vx: 0.0, vy: 0.0, vz: 0.0, life, decay: 1.0, max_life: life, p_type: 1.0, color: spark_color });
                 }
             }
         }
 
         // Particle updates
+        let drag = 0.5 * delta_time;
+        let chaos = 15.0 * scale * (1.0 + load_f);
+        let p_decay_v = (1.0 - delta_time).max(0.0);
         for p in &mut self.particles {
             if p.p_type == 0.0 {
-                // TAIL: Unstable rocket exhaust decay
-                // Add minor chaotic jitter during life
-                let chaos = 15.0 * scale * (1.0 + load_f);
-                p.vx += rng.gen_range(-chaos..chaos) * delta_time;
-                p.vy += rng.gen_range(-chaos..chaos) * delta_time;
-                p.vz += rng.gen_range(-chaos..chaos) * delta_time;
-                
-                // Slight air resistance
-                let drag = 0.5 * delta_time;
-                p.vx *= 1.0 - drag;
-                p.vy *= 1.0 - drag;
-                p.vz *= 1.0 - drag;
+                p.vx = (p.vx + rng.gen_range(-chaos..chaos) * delta_time) * (1.0 - drag);
+                p.vy = (p.vy + rng.gen_range(-chaos..chaos) * delta_time) * (1.0 - drag);
+                p.vz = (p.vz + rng.gen_range(-chaos..chaos) * delta_time) * (1.0 - drag);
             } else {
-                p.vx *= (1.0 - 1.0 * delta_time).max(0.0);
-                p.vy *= (1.0 - 1.0 * delta_time).max(0.0);
-                p.vz *= (1.0 - 1.0 * delta_time).max(0.0);
+                p.vx *= p_decay_v; p.vy *= p_decay_v; p.vz *= p_decay_v;
             }
-            p.x += p.vx * delta_time;
-            p.y += p.vy * delta_time;
-            p.z += p.vz * delta_time;
+            p.x += p.vx * delta_time; p.y += p.vy * delta_time; p.z += p.vz * delta_time;
             p.life -= p.decay * delta_time;
         }
         self.particles.retain(|p| p.life > 0.0);
@@ -989,116 +833,65 @@ impl Renderer {
 
     pub fn draw(&mut self, _device: &wgpu::Device, queue: &wgpu::Queue, color_preset: crate::app::ColorPreset, bg_effect_enabled: bool) {
         let scale = (self.height as f32 / 1080.0).max(0.2);
-        
-        // Hardcoded position: Center
         let (cx, cy) = (self.width as f32 * 0.5, self.height as f32 * 0.5);
+        let load_f = self.smoothed_load * 0.01;
+        let base_r = (60.0 + 90.0 * load_f) * scale;
         
-        let load_f = self.smoothed_load / 100.0;
-        let base_r = (60.0 + (150.0 - 60.0) * load_f) * scale;
-        
-        let mut instances = Vec::with_capacity(NUM_CORES + self.particles.len() + 2);
+        let mut instances = Vec::with_capacity((NUM_CORES + self.particles.len() + 2).min(MAX_INSTANCES));
         let mut rng = rand::thread_rng();
 
-        // Background effect intensity: scales linearly from 0.0 (at 60% CPU) to 1.0 (at 100% CPU)
         let bg_effect_intensity = if self.smoothed_load > 60.0 {
-            ((self.smoothed_load - 60.0) / 40.0).clamp(0.0, 1.0)
+            ((self.smoothed_load - 60.0) * 0.025).min(1.0)
         } else {
             0.0
         };
 
-        // Full-screen wallpaper background quad mapping
-        let (tex_w, tex_h) = {
-            let res = &self.shared_resources;
-            (res.wallpaper_texture.width() as f32, res.wallpaper_texture.height() as f32)
-        };
-        
-        let screen_aspect = self.win_w / self.win_h;
-        let tex_aspect = tex_w / tex_h;
-        
-        let (cover_scale_x, cover_scale_y, cover_offset_x, cover_offset_y) = if tex_aspect > screen_aspect {
-            let visible_w = tex_h * screen_aspect;
-            let scale_x = visible_w / tex_w;
-            (scale_x, 1.0, (1.0 - scale_x) * 0.5, 0.0)
-        } else {
-            let visible_h = tex_w / screen_aspect;
-            let scale_y = visible_h / tex_h;
-            (1.0, scale_y, 0.0, (1.0 - scale_y) * 0.5)
-        };
-
-        let monitor_uv_scale_x = cover_scale_x;
-        let monitor_uv_scale_y = cover_scale_y;
-        let monitor_uv_offset_x = cover_offset_x;
-        let monitor_uv_offset_y = cover_offset_y;
-
+        // 1. Wallpaper background
         instances.push(GpuInstance {
-            pos: [self.width as f32 * 0.5, self.height as f32 * 0.5, -499.0],
-            color: [monitor_uv_offset_x, monitor_uv_offset_y, monitor_uv_scale_x, monitor_uv_scale_y],
+            pos: [cx, cy, -499.0],
+            color: self.wp_offset_scale,
             size: 1.0,
             p_type: 4.0,
         });
 
-        // Add particles
+        // 2. Particles
         for p in &self.particles {
             let ratio = (p.life / p.max_life).clamp(0.0, 1.0);
-            let size = if p.p_type == 0.0 {
-                7.5 * scale * ratio // Thickened tail
-            } else {
-                1.8 * scale * ratio
-            };
-            let alpha = if p.p_type == 0.0 {
-                (p.life / p.max_life) * 0.7 // Life-based fading
-            } else {
-                ratio * 0.9
-            };
-            let (jit_x, jit_y, jit_z) = if p.p_type == 1.0 {
-                let jit = 1.0 * scale;
-                (rng.gen_range(-jit..jit), rng.gen_range(-jit..jit), rng.gen_range(-jit..jit))
-            } else {
-                (0.0, 0.0, 0.0)
-            };
+            let size = if p.p_type == 0.0 { 7.5 * scale * ratio } else { 1.8 * scale * ratio };
+            let alpha = if p.p_type == 0.0 { ratio * 0.7 } else { ratio * 0.9 };
+            let (mut jx, mut jy, mut jz) = (0.0, 0.0, 0.0);
+            if p.p_type == 1.0 {
+                let jit = scale; jx = rng.gen_range(-jit..jit); jy = rng.gen_range(-jit..jit); jz = rng.gen_range(-jit..jit);
+            }
             instances.push(GpuInstance { 
-                pos: [cx + p.x + jit_x, cy + p.y + jit_y, p.z + jit_z], 
+                pos: [cx + p.x + jx, cy + p.y + jy, p.z + jz], 
                 color: [p.color[0], p.color[1], p.color[2], alpha], 
-                size, 
-                p_type: 2.0 
+                size, p_type: 2.0 
             });
         }
         
-        // 3. Central glowing star logo (active under load, starting at 40% CPU load, with overheating color transition)
+        // 3. Central logo
         if load_f > 0.4 {
             let center_f = ((load_f - 0.4) / 0.6).clamp(0.0, 1.0);
-            let center_alpha = center_f.sqrt() * 0.98;
             let logo_rgb = get_logo_color(color_preset, load_f);
-            
-            let size_vibe = rng.gen_range(-2.6..2.6) * center_f * scale;
-            let center_size = base_r * 1.20 * (0.2 + 0.8 * center_f.sqrt()) + size_vibe;
-            
-            let pos_jit = 2.73 * center_f * scale;
-            let jit_x = rng.gen_range(-pos_jit..pos_jit);
-            let jit_y = rng.gen_range(-pos_jit..pos_jit);
-            
+            let center_size = base_r * 1.20 * (0.2 + 0.8 * center_f.sqrt()) + rng.gen_range(-2.6..2.6) * center_f * scale;
+            let jit = 2.73 * center_f * scale;
             instances.push(GpuInstance {
-                pos: [cx + jit_x, cy + jit_y, 0.0],
-                color: [logo_rgb[0], logo_rgb[1], logo_rgb[2], center_alpha],
-                size: center_size,
-                p_type: 3.0,
+                pos: [cx + rng.gen_range(-jit..jit), cy + rng.gen_range(-jit..jit), 0.0],
+                color: [logo_rgb[0], logo_rgb[1], logo_rgb[2], center_f.sqrt() * 0.98],
+                size: center_size, p_type: 3.0,
             });
         }
  
-        // 4. Orbiting core satellites (with individual twinkling colors)
+        // 4. Core satellites
         for i in 0..NUM_CORES {
             let angle = self.core_angles[i]; let cfg = &self.core_configs[i];
             let r = base_r * cfg.orbit_mult;
             let (sin_a, cos_a) = angle.sin_cos();
             instances.push(GpuInstance {
-                pos: [
-                    cx + r * (cos_a * cfg.u[0] + sin_a * cfg.v[0]), 
-                    cy + r * (cos_a * cfg.u[1] + sin_a * cfg.v[1]), 
-                    r * (cos_a * cfg.u[2] + sin_a * cfg.v[2])
-                ],
+                pos: [cx + r * (cos_a * cfg.u[0] + sin_a * cfg.v[0]), cy + r * (cos_a * cfg.u[1] + sin_a * cfg.v[1]), r * (cos_a * cfg.u[2] + sin_a * cfg.v[2])],
                 color: self.core_colors[i],
-                size: 9.0 * scale,
-                p_type: 1.0,
+                size: 9.0 * scale, p_type: 1.0,
             });
         }
 
@@ -1106,25 +899,13 @@ impl Renderer {
         let count = instances.len().min(MAX_INSTANCES);
         if count == 0 { return; }
 
-        let glow_factor = match self.config_glow {
-            0 => 0.15,
-            1 => 1.0,
-            2 => 2.5,
-            _ => 1.0,
-        };
+        let glow_factor = match self.config_glow { 0 => 0.15, 1 => 1.0, 2 => 2.5, _ => 1.0 };
         queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances[..count]));
         
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&ViewportUniform {
-            width: self.width as f32,
-            height: self.height as f32,
-            time: self.time,
-            load: self.smoothed_load,
-            glow_factor,
-            bg_effect_enabled: if bg_effect_enabled { 1.0 } else { 0.0 },
-            bg_effect_intensity,
-            core_x: cx,
-            core_y: cy,
-            _pad: [0.0; 3],
+            width: self.width as f32, height: self.height as f32, time: self.time, load: self.smoothed_load,
+            glow_factor, bg_effect_enabled: if bg_effect_enabled { 1.0 } else { 0.0 }, bg_effect_intensity,
+            core_x: cx, core_y: cy, _pad: [0.0; 3],
         }));
 
         let frame = match self.surface.get_current_texture() { Ok(f) => f, Err(_) => return };

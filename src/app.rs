@@ -30,15 +30,6 @@ pub enum ColorPreset {
     FrostByte,
 }
 
-#[allow(dead_code)]
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum LogoPreset {
-    Default,
-    Ring,
-    Star,
-    Custom,
-}
-
 #[derive(Copy, Clone)]
 pub struct AppState {
     pub is_paused: bool,
@@ -256,7 +247,7 @@ impl WallpaperApp {
         }
     }
 
-    pub fn update_and_draw(&mut self, delta_time: f32, overall_cpu: f32, core_usages: &[f32], glow: u8) {
+    pub fn update_and_draw(&mut self, delta_time: f32, overall_cpu: f32, glow: u8) {
         let (color_preset, bg_effect_enabled) = {
             let s = STATE.lock().unwrap();
             (s.color_preset, s.bg_effect_enabled)
@@ -267,7 +258,7 @@ impl WallpaperApp {
             let (render_w, render_h) = window::compute_renderer_size(state.width, state.height);
             state.renderer.resize(&self.device, render_w, render_h);
 
-            state.renderer.update(delta_time, overall_cpu, core_usages, color_preset);
+            state.renderer.update(delta_time, overall_cpu, color_preset);
             state.renderer.draw(&self.device, &self.queue, color_preset, bg_effect_enabled);
         }
     }
@@ -299,24 +290,7 @@ impl WallpaperApp {
     pub fn update_logo(&self) {
         log_msg("Updating logo (Star preset only for V3)");
 
-        let mut buf = vec![0u8; 512 * 512 * 4];
-        for y in 0..512 {
-            for x in 0..512 {
-                let dx = (x as f32 - 256.0) / 256.0;
-                let dy = (y as f32 - 256.0) / 256.0;
-                let d = (dx*dx + dy*dy).sqrt();
-                let angle = dy.atan2(dx);
-                let star_factor = 0.5 + 0.3 * (angle * 4.0).cos().abs();
-                let val = (-((d - star_factor * 0.4) / 0.08).powi(2)).exp();
-                let alpha = (val * 255.0).clamp(0.0, 255.0) as u8;
-                let idx = (y * 512 + x) * 4;
-                buf[idx] = 255;
-                buf[idx+1] = 255;
-                buf[idx+2] = 255;
-                buf[idx+3] = alpha;
-            }
-        }
-        let rgba = buf;
+        let rgba = crate::renderer::generate_star_logo();
 
         if let Some(ref shared) = self.shared_resources {
             self.queue.write_texture(
