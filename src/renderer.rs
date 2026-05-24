@@ -71,7 +71,7 @@ fn vs_main(input : VertexInput) -> VertexOutput {
 }
 
 // Pseudo-random number generator for pixel-level noise jitter
-fn rand(co: vec2<f32>) -> f32 {
+fn rand2d(co: vec2<f32>) -> f32 {
     return fract(sin(dot(co, vec2<f32>(12.9898, 78.233))) * 43758.5453);
 }
 
@@ -83,53 +83,60 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
         let tex_uv = (in.uv * 0.5 + vec2<f32>(0.5, 0.5)) * in.color.zw + in.color.xy;
         var final_uv = tex_uv;
         
+        let pixel_center = vec2<f32>(viewport.core_x, viewport.core_y);
+        let to_pixel = in.clip_position.xy - pixel_center;
+        let dist_px = length(to_pixel);
+
         if (viewport.bg_effect_enabled > 0.5 && viewport.bg_effect_intensity > 0.0) {
-            // 1. Shockwave Ripple (radial discrete pulse, fast propagation)
-            let pixel_center = vec2<f32>(viewport.core_x, viewport.core_y);
-            let to_pixel = in.clip_position.xy - pixel_center;
-            let dist_px = length(to_pixel);
-            
-            // Period of the pulse (e.g. 1.5 seconds)
+            // 1. Dramatic Slow-Motion Shockwave (every 1.5 seconds, slow crawl)
             let period = 1.5; 
             let pulse_time = fract(viewport.time / period) * period;
             
-            // Fast propagation speed (tripled)
-            let speed = 2700.0 + 2100.0 * viewport.bg_effect_intensity; 
+            // Slowed down propagation (was 2700+, now 1200+)
+            let speed = 1200.0 + 800.0 * viewport.bg_effect_intensity; 
             let radius = speed * pulse_time;
             
             let dist_to_wavefront = abs(dist_px - radius);
-            let thickness = 100.0; // thickness of the wave packet
+            let thickness = 150.0; // Thicker wave packet
             
-            // Radial direction vector for refraction
             var radial_dir = vec2<f32>(0.0, 0.0);
             if (dist_px > 0.1) {
                 radial_dir = to_pixel / dist_px;
             }
             
-            // Shallow wave packet
-            let wave = sin((dist_px - radius) * 0.10); 
+            let wave = sin((dist_px - radius) * 0.05); // More dramatic wave frequency
             let envelope = smoothstep(thickness, 0.0, dist_to_wavefront);
-            let fade = smoothstep(period, period * 0.7, pulse_time) * smoothstep(0.0, 0.15, pulse_time);
+            let fade = smoothstep(period, period * 0.6, pulse_time) * smoothstep(0.0, 0.2, pulse_time);
             
-            let ripple_displacement = wave * 0.0022 * viewport.bg_effect_intensity * envelope * fade;
-            
-            // Apply radial ripple displacement
+            // Increased magnitude for "exaggerated" effect
+            let ripple_displacement = wave * 0.0065 * viewport.bg_effect_intensity * envelope * fade;
             final_uv = final_uv + radial_dir * ripple_displacement;
             
-            // 2. Spiritual Pressure Jitter (pixel-level noise jitter)
-            let jitter_amp = 0.0085 * viewport.bg_effect_intensity;
-            let noise_seed = in.clip_position.xy + vec2<f32>(viewport.time * 23.45, viewport.time * 56.78);
-            let rand_val = rand(noise_seed);
-            let noise_jitter = (rand_val * 2.0 - 1.0) * jitter_amp;
+            // 2. High-Intensity Spiritual Pressure Jitter (Hyper chaotic)
+            let jitter_amp = 0.018 * viewport.bg_effect_intensity; 
+            let time_seed = floor(viewport.time * 48.0); 
             
-            // Jitter is applied vertically to represent high pressure noise
-            final_uv.y = final_uv.y + noise_jitter;
+            let noise_seed_x = in.clip_position.xy + vec2<f32>(time_seed * 1.56, time_seed * 9.8);
+            let noise_seed_y = in.clip_position.xy + vec2<f32>(time_seed * -0.74, time_seed * 21.2);
+            
+            let raw_jx = rand2d(noise_seed_x) * 2.0 - 1.0;
+            let raw_jy = rand2d(noise_seed_y) * 2.0 - 1.0;
+            let jitter_x = sign(raw_jx) * pow(abs(raw_jx), 0.5) * jitter_amp;
+            let jitter_y = sign(raw_jy) * pow(abs(raw_jy), 0.5) * jitter_amp;
+            
+            final_uv = final_uv + vec2<f32>(jitter_x, jitter_y);
         }
         
         var tex_color = textureSample(t_wallpaper, s_wallpaper, final_uv);
         
-        // Apply color desaturation from Spiritual Pressure
+        // 3. Global Atmospheric Darkening (Linear across entire screen)
+        // Only active under load, darkens the entire background as spiritual pressure rises
         if (viewport.bg_effect_enabled > 0.5 && viewport.bg_effect_intensity > 0.0) {
+            // Darken up to 60% (leaving 40% visibility) as intensity reaches max
+            let global_darken = 1.0 - (viewport.bg_effect_intensity * 0.65);
+            tex_color = vec4<f32>(tex_color.rgb * global_darken, tex_color.a);
+
+            // Apply color desaturation (Spiritual Pressure)
             let gray = 0.299 * tex_color.r + 0.587 * tex_color.g + 0.114 * tex_color.b;
             let gray_color = vec3<f32>(gray, gray, gray);
             let desat_factor = clamp(viewport.bg_effect_intensity * 1.5, 0.0, 1.0);
@@ -216,59 +223,91 @@ pub struct ColorPalette {
 pub fn get_palette(preset: crate::app::ColorPreset) -> ColorPalette {
     match preset {
         crate::app::ColorPreset::AtomicStarlink => ColorPalette {
-            // Pure Cyan/Blue theme
             color_a: [0.0, 0.900, 1.0, 1.0],   
             color_b: [0.0, 0.600, 1.0, 1.0],   
             color_c: [0.0, 0.400, 0.900, 1.0],   
             color_d: [0.0, 0.200, 0.700, 1.0],   
         },
         crate::app::ColorPreset::Cyberpunk => ColorPalette {
-            // Neon Violet/Pink theme
             color_a: [0.850, 0.0, 1.0, 1.0],   
             color_b: [1.0, 0.0, 0.800, 1.0],   
             color_c: [0.600, 0.0, 0.900, 1.0],   
             color_d: [0.400, 0.0, 0.700, 1.0],   
         },
         crate::app::ColorPreset::AcidGreen => ColorPalette {
-            // Toxic Lime/Green theme
             color_a: [0.300, 1.0, 0.0, 1.0], 
             color_b: [0.100, 0.900, 0.0, 1.0],   
             color_c: [0.050, 0.700, 0.0, 1.0],     
             color_d: [0.0, 0.500, 0.0, 1.0], 
         },
         crate::app::ColorPreset::SolarFlame => ColorPalette {
-            // Fire Orange/Red theme
             color_a: [1.0, 0.400, 0.0, 1.0],   
             color_b: [1.0, 0.200, 0.0, 1.0],   
             color_c: [0.900, 0.050, 0.0, 1.0],     
             color_d: [0.700, 0.0, 0.0, 1.0],   
         },
         crate::app::ColorPreset::DeepOcean => ColorPalette {
-            // Deep Teal/Turquoise theme
             color_a: [0.0, 1.0, 0.600, 1.0], 
             color_b: [0.0, 0.800, 0.500, 1.0], 
             color_c: [0.0, 0.600, 0.400, 1.0], 
             color_d: [0.0, 0.400, 0.300, 1.0], 
         },
+        crate::app::ColorPreset::EmeraldPulse => ColorPalette {
+            color_a: [0.0, 1.0, 0.4, 1.0],
+            color_b: [0.0, 0.8, 0.2, 1.0],
+            color_c: [0.0, 0.6, 0.1, 1.0],
+            color_d: [0.0, 0.4, 0.0, 1.0],
+        },
+        crate::app::ColorPreset::CrimsonNova => ColorPalette {
+            color_a: [1.0, 0.0, 0.2, 1.0],
+            color_b: [0.8, 0.0, 0.1, 1.0],
+            color_c: [0.6, 0.0, 0.05, 1.0],
+            color_d: [0.4, 0.0, 0.0, 1.0],
+        },
+        crate::app::ColorPreset::VioletNight => ColorPalette {
+            color_a: [0.5, 0.0, 1.0, 1.0],
+            color_b: [0.4, 0.0, 0.8, 1.0],
+            color_c: [0.3, 0.0, 0.6, 1.0],
+            color_d: [0.2, 0.0, 0.4, 1.0],
+        },
+        crate::app::ColorPreset::AmberGhost => ColorPalette {
+            color_a: [1.0, 0.8, 0.0, 1.0],
+            color_b: [0.8, 0.6, 0.0, 1.0],
+            color_c: [0.6, 0.4, 0.0, 1.0],
+            color_d: [0.4, 0.2, 0.0, 1.0],
+        },
+        crate::app::ColorPreset::FrostByte => ColorPalette {
+            color_a: [0.7, 0.9, 1.0, 1.0],
+            color_b: [0.5, 0.8, 1.0, 1.0],
+            color_c: [0.3, 0.7, 1.0, 1.0],
+            color_d: [0.1, 0.6, 1.0, 1.0],
+        },
     }
 }
 
 pub fn get_logo_color(preset: crate::app::ColorPreset, load_f: f32) -> [f32; 3] {
-    if load_f <= 0.4 {
-        return [1.0, 1.0, 1.0];
-    }
-    let t = ((load_f - 0.4) / 0.6).clamp(0.0, 1.0);
-    let overheat_color = match preset {
-        crate::app::ColorPreset::AtomicStarlink => [0.3, 0.7, 1.0],
-        crate::app::ColorPreset::Cyberpunk => [1.0, 0.3, 0.9],
-        crate::app::ColorPreset::AcidGreen => [0.6, 1.0, 0.3],
-        crate::app::ColorPreset::SolarFlame => [1.0, 0.7, 0.1],
-        crate::app::ColorPreset::DeepOcean => [0.2, 1.0, 0.8],
+    let base_rgb = match preset {
+        crate::app::ColorPreset::AtomicStarlink => [1.0, 0.6, 0.0],
+        crate::app::ColorPreset::Cyberpunk => [0.0, 1.0, 0.8],
+        crate::app::ColorPreset::AcidGreen => [1.0, 0.2, 0.8],
+        crate::app::ColorPreset::SolarFlame => [0.0, 0.6, 1.0],
+        crate::app::ColorPreset::DeepOcean => [1.0, 0.4, 0.0],
+        crate::app::ColorPreset::EmeraldPulse => [1.0, 0.3, 0.3], // Emerald contrast: Red
+        crate::app::ColorPreset::CrimsonNova => [0.2, 1.0, 1.0],  // Crimson contrast: Cyan
+        crate::app::ColorPreset::VioletNight => [0.8, 1.0, 0.0],  // Violet contrast: Yellow/Lime
+        crate::app::ColorPreset::AmberGhost => [0.0, 0.5, 1.0],   // Amber contrast: Azure
+        crate::app::ColorPreset::FrostByte => [1.0, 0.5, 0.0],    // Frost contrast: Orange
     };
+
+    if load_f <= 0.4 {
+        return base_rgb;
+    }
+    
+    let t = ((load_f - 0.4) / 0.6).clamp(0.0, 1.0);
     [
-        1.0 + (overheat_color[0] - 1.0) * t,
-        1.0 + (overheat_color[1] - 1.0) * t,
-        1.0 + (overheat_color[2] - 1.0) * t,
+        base_rgb[0] + (1.0 - base_rgb[0]) * t * 0.5,
+        base_rgb[1] + (1.0 - base_rgb[1]) * t * 0.5,
+        base_rgb[2] + (1.0 - base_rgb[2]) * t * 0.5,
     ]
 }
 
@@ -591,11 +630,6 @@ pub struct Renderer {
     pub dcomp_target: windows::Win32::Graphics::DirectComposition::IDCompositionTarget,
     #[allow(dead_code)]
     pub dcomp_visual: windows::Win32::Graphics::DirectComposition::IDCompositionVisual,
-    // Multi-monitor mapping
-    pub vs_x: f32,
-    pub vs_y: f32,
-    pub vs_w: f32,
-    pub vs_h: f32,
     pub win_w: f32,
     pub win_h: f32,
 
@@ -616,10 +650,6 @@ impl Renderer {
         shared_resources: std::sync::Arc<SharedRenderResources>,
         render_w: usize,
         render_h: usize,
-        vs_x: f32,
-        vs_y: f32,
-        vs_w: f32,
-        vs_h: f32,
         win_w: f32,
         win_h: f32,
     ) -> Self {
@@ -723,10 +753,6 @@ impl Renderer {
             dcomp_device,
             dcomp_target,
             dcomp_visual,
-            vs_x,
-            vs_y,
-            vs_w,
-            vs_h,
             win_w,
             win_h,
             core_flicker_timers,
@@ -785,11 +811,7 @@ impl Renderer {
         for angle in &mut self.core_angles { *angle += speed * delta_time; }
  
         let scale = (self.height as f32 / 1080.0).max(0.2);
-        let orbit_mult = {
-            let state = crate::app::STATE.lock().unwrap();
-            state.core_orbit_r
-        };
-        let base_r = (60.0 + (150.0 - 60.0) * load_f) * scale * orbit_mult;
+        let base_r = (60.0 + (150.0 - 60.0) * load_f) * scale;
         
         let palette = get_palette(color_preset);
 
@@ -852,8 +874,20 @@ impl Renderer {
             let r_orbit = base_r * cfg.orbit_mult;
             let current_core_color = self.core_colors[i];
             
-            // 1. TAIL: Interpolated flame trail matching core's twinkling color
+            // 1. TAIL: Interpolated flame trail matching core's movement direction
             let num_steps = if load_f > 0.5 { 4 } else if load_f > 0.2 { 2 } else { 1 };
+            
+            // Core's orbital direction vector at this moment
+            let (sin_a, cos_a) = angle.sin_cos();
+            let tangent = [
+                -sin_a * cfg.u[0] + cos_a * cfg.v[0],
+                -sin_a * cfg.u[1] + cos_a * cfg.v[1],
+                -sin_a * cfg.u[2] + cos_a * cfg.v[2],
+            ];
+            // Movement vector (opposite to tail direction)
+            let core_vel_mag = speed * r_orbit;
+            let mv = [tangent[0] * core_vel_mag, tangent[1] * core_vel_mag, tangent[2] * core_vel_mag];
+            
             for step in 0..num_steps {
                 let t_step = step as f32 / num_steps as f32;
                 let interpolated_angle = prev_angle + (angle - prev_angle) * t_step;
@@ -862,10 +896,16 @@ impl Renderer {
                 let py = r_orbit * (cos_ia * cfg.u[1] + sin_ia * cfg.v[1]);
                 let pz = r_orbit * (cos_ia * cfg.u[2] + sin_ia * cfg.v[2]);
 
-                let initial_life = 0.12 + load_f * 0.18;
+                let initial_life = 0.25 + load_f * 0.25;
+                // Unstable rocket exhaust: initial velocity is opposite to core movement plus some jitter
+                let exhaust_jitter = 50.0 * scale * (1.0 + load_f);
+                let vx = -mv[0] * 0.3 + rng.gen_range(-exhaust_jitter..exhaust_jitter);
+                let vy = -mv[1] * 0.3 + rng.gen_range(-exhaust_jitter..exhaust_jitter);
+                let vz = -mv[2] * 0.3 + rng.gen_range(-exhaust_jitter..exhaust_jitter);
+
                 self.particles.push(Particle {
                     x: px, y: py, z: pz,
-                    vx: 0.0, vy: 0.0, vz: 0.0,
+                    vx, vy, vz,
                     life: initial_life,
                     decay: 1.0,
                     max_life: initial_life,
@@ -874,9 +914,9 @@ impl Renderer {
                 });
             }
 
-            // 2. SPARK: Spontaneous static electric discharges matching core's twinkling color
+            // 2. SPARK: Spontaneous static electric discharges matching contrast color
             if load_f > 0.5 {
-                let spark_chance = (load_f - 0.5) * 1.5;
+                let spark_chance = (load_f - 0.5) * 3.0; // Doubled frequency
                 if rng.gen::<f32>() < spark_chance {
                     let (sin_a, cos_a) = angle.sin_cos();
                     let px = r_orbit * (cos_a * cfg.u[0] + sin_a * cfg.v[0]);
@@ -896,7 +936,10 @@ impl Renderer {
                     let jit = 4.0 * scale; 
                     let life = rng.gen_range(0.05..0.15); 
                     
-                    for _ in 0..3 {
+                    let logo_rgb = get_logo_color(color_preset, load_f);
+                    let spark_color = [logo_rgb[0], logo_rgb[1], logo_rgb[2], 1.0];
+                    
+                    for _ in 0..5 { // Increased steps from 3 to 5
                         curr_x += dir[0] * step_len + rng.gen_range(-jit..jit);
                         curr_y += dir[1] * step_len + rng.gen_range(-jit..jit);
                         curr_z += dir[2] * step_len + rng.gen_range(-jit..jit);
@@ -908,7 +951,7 @@ impl Renderer {
                             decay: 1.0,
                             max_life: life,
                             p_type: 1.0,
-                            color: current_core_color,
+                            color: spark_color,
                         });
                     }
                 }
@@ -918,15 +961,18 @@ impl Renderer {
         // Particle updates
         for p in &mut self.particles {
             if p.p_type == 0.0 {
-                // TAIL: Swaying flame physics (periodic horizontal wave rising upward)
-                let age = p.max_life - p.life;
-                let sway_speed = 14.0;
-                let sway_amount = 160.0 * scale * (p.life / p.max_life); 
-                let phase = self.time * sway_speed - age * 25.0;
+                // TAIL: Unstable rocket exhaust decay
+                // Add minor chaotic jitter during life
+                let chaos = 15.0 * scale * (1.0 + load_f);
+                p.vx += rng.gen_range(-chaos..chaos) * delta_time;
+                p.vy += rng.gen_range(-chaos..chaos) * delta_time;
+                p.vz += rng.gen_range(-chaos..chaos) * delta_time;
                 
-                p.vx = phase.sin() * sway_amount + rng.gen_range(-15.0..15.0) * scale;
-                p.vy = -200.0 * scale * (0.4 + 0.6 * (p.life / p.max_life)); 
-                p.vz = phase.cos() * (sway_amount * 0.3); 
+                // Slight air resistance
+                let drag = 0.5 * delta_time;
+                p.vx *= 1.0 - drag;
+                p.vy *= 1.0 - drag;
+                p.vz *= 1.0 - drag;
             } else {
                 p.vx *= (1.0 - 1.0 * delta_time).max(0.0);
                 p.vy *= (1.0 - 1.0 * delta_time).max(0.0);
@@ -944,22 +990,11 @@ impl Renderer {
     pub fn draw(&mut self, _device: &wgpu::Device, queue: &wgpu::Queue, color_preset: crate::app::ColorPreset, bg_effect_enabled: bool) {
         let scale = (self.height as f32 / 1080.0).max(0.2);
         
-        let (core_size_mult, core_orbit_mult, sat_size_mult, core_position) = {
-            let state = crate::app::STATE.lock().unwrap();
-            (state.core_size, state.core_orbit_r, state.satellite_size, state.core_position)
-        };
+        // Hardcoded position: Center
+        let (cx, cy) = (self.width as f32 * 0.5, self.height as f32 * 0.5);
         
-        let (cx, cy) = match core_position {
-            crate::app::CorePosition::TopRight => {
-                let padding = 200.0 * scale;
-                (self.width as f32 - padding, padding)
-            }
-            crate::app::CorePosition::Center => {
-                (self.width as f32 * 0.5, self.height as f32 * 0.5)
-            }
-        };
         let load_f = self.smoothed_load / 100.0;
-        let base_r = (60.0 + (150.0 - 60.0) * load_f) * scale * core_orbit_mult;
+        let base_r = (60.0 + (150.0 - 60.0) * load_f) * scale;
         
         let mut instances = Vec::with_capacity(NUM_CORES + self.particles.len() + 2);
         let mut rng = rand::thread_rng();
@@ -977,7 +1012,7 @@ impl Renderer {
             (res.wallpaper_texture.width() as f32, res.wallpaper_texture.height() as f32)
         };
         
-        let screen_aspect = self.vs_w / self.vs_h;
+        let screen_aspect = self.win_w / self.win_h;
         let tex_aspect = tex_w / tex_h;
         
         let (cover_scale_x, cover_scale_y, cover_offset_x, cover_offset_y) = if tex_aspect > screen_aspect {
@@ -990,10 +1025,10 @@ impl Renderer {
             (1.0, scale_y, 0.0, (1.0 - scale_y) * 0.5)
         };
 
-        let monitor_uv_scale_x = (self.win_w / self.vs_w) * cover_scale_x;
-        let monitor_uv_scale_y = (self.win_h / self.vs_h) * cover_scale_y;
-        let monitor_uv_offset_x = cover_offset_x + (self.vs_x / self.vs_w) * cover_scale_x;
-        let monitor_uv_offset_y = cover_offset_y + (self.vs_y / self.vs_h) * cover_scale_y;
+        let monitor_uv_scale_x = cover_scale_x;
+        let monitor_uv_scale_y = cover_scale_y;
+        let monitor_uv_offset_x = cover_offset_x;
+        let monitor_uv_offset_y = cover_offset_y;
 
         instances.push(GpuInstance {
             pos: [self.width as f32 * 0.5, self.height as f32 * 0.5, -499.0],
@@ -1006,12 +1041,12 @@ impl Renderer {
         for p in &self.particles {
             let ratio = (p.life / p.max_life).clamp(0.0, 1.0);
             let size = if p.p_type == 0.0 {
-                3.5 * scale * ratio
+                7.5 * scale * ratio // Thickened tail
             } else {
                 1.8 * scale * ratio
             };
             let alpha = if p.p_type == 0.0 {
-                p.life * 0.6
+                (p.life / p.max_life) * 0.7 // Life-based fading
             } else {
                 ratio * 0.9
             };
@@ -1036,7 +1071,7 @@ impl Renderer {
             let logo_rgb = get_logo_color(color_preset, load_f);
             
             let size_vibe = rng.gen_range(-2.6..2.6) * center_f * scale;
-            let center_size = base_r * (core_size_mult * 0.60) * (0.2 + 0.8 * center_f.sqrt()) + size_vibe;
+            let center_size = base_r * 1.20 * (0.2 + 0.8 * center_f.sqrt()) + size_vibe;
             
             let pos_jit = 2.73 * center_f * scale;
             let jit_x = rng.gen_range(-pos_jit..pos_jit);
@@ -1062,7 +1097,7 @@ impl Renderer {
                     r * (cos_a * cfg.u[2] + sin_a * cfg.v[2])
                 ],
                 color: self.core_colors[i],
-                size: 9.0 * scale * sat_size_mult,
+                size: 9.0 * scale,
                 p_type: 1.0,
             });
         }

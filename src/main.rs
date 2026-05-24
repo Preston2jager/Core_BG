@@ -76,11 +76,11 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
         tray::WM_TRAY_CALLBACK => {
             let event = lparam as u32;
             if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
-                let (bg_effect_enabled, core_position) = {
+                let bg_effect_enabled = {
                     let state = STATE.lock().unwrap();
-                    (state.bg_effect_enabled, state.core_position)
+                    state.bg_effect_enabled
                 };
-                tray::show_context_menu(hwnd, bg_effect_enabled, core_position);
+                tray::show_context_menu(hwnd, bg_effect_enabled);
             }
             0
         }
@@ -98,25 +98,13 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
                     STATE.lock().unwrap().pending_refresh = true;
                 }
                 tray::ID_SETTINGS => {
-                    log_msg("Menu: Adjust Effects clicked");
+                    log_msg("Menu: Color Presets clicked");
                     STATE.lock().unwrap().pending_settings_show = true;
                 }
                 tray::ID_BG_EFFECT => {
                     let mut state = STATE.lock().unwrap();
                     state.bg_effect_enabled = !state.bg_effect_enabled;
                     log_msg(&format!("Menu: Toggle Wallpaper Load Effect, now = {}", state.bg_effect_enabled));
-                    app::save_settings(&state);
-                }
-                tray::ID_POS_TOPRIGHT => {
-                    let mut state = STATE.lock().unwrap();
-                    state.core_position = app::CorePosition::TopRight;
-                    log_msg("Menu: Core Position set to Top-Right");
-                    app::save_settings(&state);
-                }
-                tray::ID_POS_CENTER => {
-                    let mut state = STATE.lock().unwrap();
-                    state.core_position = app::CorePosition::Center;
-                    log_msg("Menu: Core Position set to Center");
                     app::save_settings(&state);
                 }
                 _ => {}

@@ -23,6 +23,11 @@ pub enum ColorPreset {
     AcidGreen,
     SolarFlame,
     DeepOcean,
+    EmeraldPulse,
+    CrimsonNova,
+    VioletNight,
+    AmberGhost,
+    FrostByte,
 }
 
 #[allow(dead_code)]
@@ -34,12 +39,6 @@ pub enum LogoPreset {
     Custom,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum CorePosition {
-    TopRight,
-    Center,
-}
-
 #[derive(Copy, Clone)]
 pub struct AppState {
     pub is_paused: bool,
@@ -47,15 +46,7 @@ pub struct AppState {
     pub glow: u8,
     pub should_exit: bool,
     
-    // Core parameters (multipliers & offsets)
-    pub core_size: f32,       // default: 1.0
-    pub core_orbit_r: f32,    // default: 1.0
-    pub satellite_size: f32,  // default: 1.0
-    pub core_position: CorePosition,
-    
     pub color_preset: ColorPreset,
-    #[allow(dead_code)]
-    pub logo_preset: LogoPreset,
     pub bg_effect_enabled: bool,
 
     // Thread communication flags
@@ -70,13 +61,7 @@ pub static STATE: Mutex<AppState> = Mutex::new(AppState {
     glow: 1,
     should_exit: false,
     
-    core_size: 1.0,
-    core_orbit_r: 1.0,
-    satellite_size: 1.0,
-    core_position: CorePosition::TopRight,
-    
     color_preset: ColorPreset::AtomicStarlink,
-    logo_preset: LogoPreset::Star,
     bg_effect_enabled: true,
 
     pending_refresh: false,
@@ -86,22 +71,14 @@ pub static STATE: Mutex<AppState> = Mutex::new(AppState {
 
 pub fn save_settings(state: &AppState) {
     let content = format!(
-        "core_size={}\n\
-         core_orbit_r={}\n\
-         satellite_size={}\n\
-         color_preset={:?}\n\
+        "color_preset={:?}\n\
          fps={}\n\
          glow={}\n\
-         bg_effect_enabled={}\n\
-         core_position={:?}\n",
-        state.core_size,
-        state.core_orbit_r,
-        state.satellite_size,
+         bg_effect_enabled={}\n",
         state.color_preset,
         state.fps,
         state.glow,
         state.bg_effect_enabled,
-        state.core_position
     );
     if let Ok(mut file) = File::create("settings.txt") {
         let _ = file.write_all(content.as_bytes());
@@ -114,12 +91,7 @@ pub fn load_settings() -> AppState {
         fps: 60,
         glow: 1,
         should_exit: false,
-        core_size: 1.0,
-        core_orbit_r: 1.0,
-        satellite_size: 1.0,
-        core_position: CorePosition::TopRight,
         color_preset: ColorPreset::AtomicStarlink,
-        logo_preset: LogoPreset::Star,
         bg_effect_enabled: true,
         pending_refresh: false,
         pending_logo_update: false,
@@ -135,9 +107,6 @@ pub fn load_settings() -> AppState {
                     let key = parts[0].trim();
                     let val = parts[1].trim();
                     match key {
-                        "core_size" => if let Ok(v) = val.parse::<f32>() { state.core_size = v; },
-                        "core_orbit_r" => if let Ok(v) = val.parse::<f32>() { state.core_orbit_r = v; },
-                        "satellite_size" => if let Ok(v) = val.parse::<f32>() { state.satellite_size = v; },
                         "fps" => if let Ok(v) = val.parse::<u32>() { state.fps = v; },
                         "glow" => if let Ok(v) = val.parse::<u8>() { state.glow = v; },
                         "bg_effect_enabled" => if let Ok(v) = val.parse::<bool>() { state.bg_effect_enabled = v; },
@@ -147,13 +116,12 @@ pub fn load_settings() -> AppState {
                                 "AcidGreen" => ColorPreset::AcidGreen,
                                 "SolarFlame" => ColorPreset::SolarFlame,
                                 "DeepOcean" => ColorPreset::DeepOcean,
+                                "EmeraldPulse" => ColorPreset::EmeraldPulse,
+                                "CrimsonNova" => ColorPreset::CrimsonNova,
+                                "VioletNight" => ColorPreset::VioletNight,
+                                "AmberGhost" => ColorPreset::AmberGhost,
+                                "FrostByte" => ColorPreset::FrostByte,
                                 _ => ColorPreset::AtomicStarlink,
-                            };
-                        }
-                        "core_position" => {
-                            state.core_position = match val {
-                                "Center" => CorePosition::Center,
-                                _ => CorePosition::TopRight,
                             };
                         }
                         _ => {}

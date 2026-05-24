@@ -290,10 +290,6 @@ pub unsafe fn sync_monitor_windows(
                     shared_resources.as_ref().unwrap().clone(),
                     render_w,
                     render_h,
-                    x as f32,
-                    y as f32,
-                    virtual_width as f32,
-                    virtual_height as f32,
                     width as f32,
                     height as f32,
                 );

@@ -10,8 +10,6 @@ pub const ID_EXIT: usize = 1001;
 pub const ID_REFRESH: usize = 1008;
 pub const ID_SETTINGS: usize = 1009;
 pub const ID_BG_EFFECT: usize = 1010;
-pub const ID_POS_TOPRIGHT: usize = 1021;
-pub const ID_POS_CENTER: usize = 1022;
 
 pub unsafe fn add_tray_icon(hwnd: HWND) -> bool {
     let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
@@ -43,7 +41,6 @@ pub unsafe fn remove_tray_icon(hwnd: HWND) -> bool {
 pub unsafe fn show_context_menu(
     hwnd: HWND, 
     bg_effect_enabled: bool,
-    core_position: crate::app::CorePosition,
 ) {
     let mut point = POINT { x: 0, y: 0 };
     GetCursorPos(&mut point);
@@ -57,19 +54,11 @@ pub unsafe fn show_context_menu(
     let bg_effect_flags = if bg_effect_enabled { MF_STRING | MF_CHECKED } else { MF_STRING };
     AppendMenuW(menu, bg_effect_flags, ID_BG_EFFECT, to_wide("Wallpaper Load Effect").as_ptr());
 
-    // 2. Core Position Preset Submenu
-    let pos_menu = CreatePopupMenu();
-    let tr_flags = if core_position == crate::app::CorePosition::TopRight { MF_STRING | MF_CHECKED } else { MF_STRING };
-    let c_flags = if core_position == crate::app::CorePosition::Center { MF_STRING | MF_CHECKED } else { MF_STRING };
-    AppendMenuW(pos_menu, tr_flags, ID_POS_TOPRIGHT, to_wide("Top-Right Corner").as_ptr());
-    AppendMenuW(pos_menu, c_flags, ID_POS_CENTER, to_wide("Screen Center").as_ptr());
-    AppendMenuW(menu, MF_POPUP, pos_menu as usize, to_wide("Core Position Preset").as_ptr());
-
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
     
-    // 3. Refresh & Settings options
+    // 2. Refresh & Settings options
     AppendMenuW(menu, MF_STRING, ID_REFRESH, to_wide("Refresh Wallpaper").as_ptr());
-    AppendMenuW(menu, MF_STRING, ID_SETTINGS, to_wide("Adjust Effects...").as_ptr());
+    AppendMenuW(menu, MF_STRING, ID_SETTINGS, to_wide("Color Presets...").as_ptr());
     
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
 
