@@ -1,0 +1,6 @@
+/target
+/backup_*
+*.log
+.antigravitycli/
+debug/
+release/

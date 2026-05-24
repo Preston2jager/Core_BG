@@ -1,0 +1,8 @@
+core_size=2.93
+core_orbit_r=0.76
+satellite_size=1.94
+color_preset=SolarFlame
+fps=60
+glow=2
+bg_effect_enabled=true
+core_position=Center
