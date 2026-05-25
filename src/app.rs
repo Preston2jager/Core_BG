@@ -252,11 +252,31 @@ impl WallpaperApp {
             let s = STATE.lock().unwrap();
             (s.color_preset, s.bg_effect_enabled)
         };
+
+        // Calculate virtual screen in physical pixels from known monitors
+        let mut v_left = 0;
+        let mut v_top = 0;
+        let mut v_right = 0;
+        let mut v_bottom = 0;
+        if !self.monitor_states.is_empty() {
+            v_left = self.monitor_states[0].rect.left;
+            v_top = self.monitor_states[0].rect.top;
+            v_right = self.monitor_states[0].rect.right;
+            v_bottom = self.monitor_states[0].rect.bottom;
+            for state in &self.monitor_states[1..] {
+                v_left = v_left.min(state.rect.left);
+                v_top = v_top.min(state.rect.top);
+                v_right = v_right.max(state.rect.right);
+                v_bottom = v_bottom.max(state.rect.bottom);
+            }
+        }
+        let v_rect = RECT { left: v_left, top: v_top, right: v_right, bottom: v_bottom };
+
         for state in &mut self.monitor_states {
             state.renderer.config_glow = glow;
 
             let (render_w, render_h) = window::compute_renderer_size(state.width, state.height);
-            state.renderer.resize(&self.device, render_w, render_h);
+            state.renderer.resize(&self.device, render_w, render_h, state.rect, v_rect);
 
             state.renderer.update(delta_time, overall_cpu, color_preset);
             state.renderer.draw(&self.device, &self.queue, color_preset, bg_effect_enabled);

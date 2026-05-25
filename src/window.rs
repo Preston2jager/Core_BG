@@ -131,7 +131,8 @@ pub unsafe fn register_tray_class(hinstance: HINSTANCE, wnd_proc: WNDPROC) -> BO
     1
 }
 
-use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, HMONITOR, HDC};
+use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, HMONITOR, HDC, GetMonitorInfoW, MONITORINFO};
+use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 
 pub struct MonitorBounds {
     pub rect: RECT,
@@ -139,13 +140,18 @@ pub struct MonitorBounds {
 
 pub unsafe fn get_monitor_bounds() -> Vec<MonitorBounds> {
     unsafe extern "system" fn enum_monitors_proc(
-        _hmonitor: HMONITOR,
+        hmonitor: HMONITOR,
         _hdc: HDC,
-        rect: *mut RECT,
+        _rect: *mut RECT,
         lparam: LPARAM,
     ) -> BOOL {
         let monitors = &mut *(lparam as *mut Vec<MonitorBounds>);
-        monitors.push(MonitorBounds { rect: *rect });
+        
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(hmonitor, &mut info) != 0 {
+            monitors.push(MonitorBounds { rect: info.rcMonitor });
+        }
         1 // continue enumeration
     }
 
@@ -175,67 +181,50 @@ pub unsafe fn sync_monitor_windows(
     shared_resources: &mut Option<std::sync::Arc<crate::renderer::SharedRenderResources>>,
     desktop_info: &DesktopInfo,
 ) {
-    let virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    let virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    let virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    let virtual_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    crate::app::log_msg(&format!("Virtual Screen: ({}, {}) {}x{}", virtual_left, virtual_top, virtual_width, virtual_height));
-
+    let current_monitors = get_monitor_bounds();
     let parent_hwnd = desktop_info.parent_hwnd;
 
-    if parent_hwnd != 0 {
-        let mut parent_rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        GetWindowRect(parent_hwnd, &mut parent_rect);
-        let parent_w = parent_rect.right - parent_rect.left;
-        let parent_h = parent_rect.bottom - parent_rect.top;
-        // Only resize if it's already reasonably large or if it's the known Progman/WorkerW
-        // Avoid resizing tiny utility windows that we might have picked up by mistake
-        let is_likely_wallpaper_window = parent_w > 500 && parent_h > 500;
-        
-        if (parent_rect.left != virtual_left || parent_rect.top != virtual_top ||
-           parent_w != virtual_width || parent_h != virtual_height) && is_likely_wallpaper_window {
-            crate::app::log_msg(&format!("Resizing parent window {} from ({}, {}) {}x{} to cover virtual screen ({}, {}) {}x{}",
-                parent_hwnd, parent_rect.left, parent_rect.top, parent_w, parent_h,
-                virtual_left, virtual_top, virtual_width, virtual_height));
-            SetWindowPos(
-                parent_hwnd,
-                0,
-                virtual_left,
-                virtual_top,
-                virtual_width,
-                virtual_height,
-                SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            );
+    // Compute virtual screen bounds in physical pixels
+    let mut v_left = 0;
+    let mut v_top = 0;
+    let mut v_right = 0;
+    let mut v_bottom = 0;
+    if !current_monitors.is_empty() {
+        v_left = current_monitors[0].rect.left;
+        v_top = current_monitors[0].rect.top;
+        v_right = current_monitors[0].rect.right;
+        v_bottom = current_monitors[0].rect.bottom;
+        for m in &current_monitors[1..] {
+            v_left = v_left.min(m.rect.left);
+            v_top = v_top.min(m.rect.top);
+            v_right = v_right.max(m.rect.right);
+            v_bottom = v_bottom.max(m.rect.bottom);
         }
     }
-
-    let current_monitors = get_monitor_bounds();
+    let v_rect = RECT { left: v_left, top: v_top, right: v_right, bottom: v_bottom };
 
     if current_monitors.len() != monitor_states.len() {
         crate::app::log_msg(&format!("Monitor count changed from {} to {}. Re-initializing windows.", monitor_states.len(), current_monitors.len()));
         
         while let Some(state) = monitor_states.pop() {
             let hwnd = state.hwnd;
-            drop(state); // Drop the state, which drops the Renderer and the Surface, while the hwnd is still valid!
-            DestroyWindow(hwnd); // Now destroy the window!
+            drop(state);
+            DestroyWindow(hwnd);
         }
 
         let class_name_str = WALLPAPER_CLASS_NAME.lock().unwrap().clone();
         let class_name = to_wide(&class_name_str);
         for (idx, monitor) in current_monitors.iter().enumerate() {
             let rect = monitor.rect;
-            let x = rect.left - virtual_left;
-            let y = rect.top - virtual_top;
+            
+            let mut pt = POINT { x: rect.left, y: rect.top };
+            ScreenToClient(parent_hwnd, &mut pt);
+            let x = pt.x;
+            let y = pt.y;
             let width = rect.right - rect.left;
             let height = rect.bottom - rect.top;
-            let label = if parent_hwnd == desktop_info.parent_hwnd {
-                "WORKERW"
-            } else if parent_hwnd != 0 {
-                "PROGMAN"
-            } else {
-                "TOP"
-            };
-            crate::app::log_msg(&format!("Attempting to create window for monitor {} at ({}, {}) with parent {} ({})", idx, x, y, parent_hwnd, label));
+            
+            crate::app::log_msg(&format!("Monitor {} at screen ({}, {}), relative to parent client ({}, {})", idx, rect.left, rect.top, x, y));
 
             let (ex_style, style) = (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, WS_POPUP);
 
@@ -248,18 +237,15 @@ pub unsafe fn sync_monitor_windows(
                 y,
                 width,
                 height,
-                0, // Create as top-level initially
+                0,
                 0,
                 hinstance,
                 std::ptr::null(),
             );
 
             if hwnd != 0 {
-                crate::app::log_msg(&format!("Successfully created window {} for monitor {}.", hwnd, idx));
-                
                 let (render_w, render_h) = compute_renderer_size(width, height);
 
-                // Initialize shared resources on the first successful window if not already done
                 if shared_resources.is_none() {
                     let hwnd_val = std::num::NonZeroIsize::new(hwnd as isize).unwrap();
                     let mut win_handle = raw_window_handle::Win32WindowHandle::new(hwnd_val);
@@ -267,12 +253,11 @@ pub unsafe fn sync_monitor_windows(
                     let temp_surface = unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle { 
                         raw_display_handle: raw_window_handle::RawDisplayHandle::Windows(raw_window_handle::WindowsDisplayHandle::new()),
                         raw_window_handle: raw_window_handle::RawWindowHandle::Win32(win_handle),
-                    })}.expect("Failed to create temporary surface for format detection");
+                    })}.expect("Failed to create temporary surface");
                     
                     let caps = temp_surface.get_capabilities(adapter);
                     let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
-                    
-                    drop(temp_surface); // release surface before initializing resource
+                    drop(temp_surface);
  
                     *shared_resources = Some(std::sync::Arc::new(crate::renderer::SharedRenderResources::new(
                         device,
@@ -282,79 +267,47 @@ pub unsafe fn sync_monitor_windows(
                 }
  
                 let renderer = crate::renderer::Renderer::new(
-                    instance,
-                    adapter,
-                    device,
-                    hwnd,
-                    hinstance,
+                    instance, adapter, device, hwnd, hinstance,
                     shared_resources.as_ref().unwrap().clone(),
-                    render_w,
-                    render_h,
-                    width as f32,
-                    height as f32,
+                    render_w, render_h, width as f32, height as f32,
+                    rect,
+                    v_rect,
                 );
 
-                crate::app::log_msg(&format!("Parenting window {} to parent {}", hwnd, parent_hwnd));
                 SetParent(hwnd, parent_hwnd);
-
-                // Give the OS a moment to stabilize the hierarchy
                 std::thread::sleep(std::time::Duration::from_millis(100));
 
-                // Find the shell view sibling to place our window behind it
                 let shell_view = FindWindowExW(parent_hwnd, 0, to_wide("SHELLDLL_DefView").as_ptr(), std::ptr::null());
-                let insert_after = if shell_view != 0 {
-                    crate::app::log_msg(&format!("Found shell view sibling {}. Placing wallpaper behind it.", shell_view));
-                    shell_view // Place AFTER shell_view (i.e., behind it)
-                } else {
-                    1 // HWND_BOTTOM
-                };
+                let insert_after = if shell_view != 0 { shell_view } else { 1 };
 
-                // Ensure it is at the bottom of the z-order among children
-                SetWindowPos(
-                    hwnd,
-                    insert_after,
-                    x,
-                    y,
-                    width,
-                    height,
-                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
+                SetWindowPos(hwnd, insert_after, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
-                monitor_states.push(crate::app::MonitorState {
-                    hwnd,
-                    rect,
-                    width,
-                    height,
-                    renderer,
-                });
-            } else {
-                let err = unsafe { GetLastError() };
-                crate::app::log_msg(&format!("Failed to create window for monitor at ({}, {}): GetLastError={}", rect.left, rect.top, err));
+                monitor_states.push(crate::app::MonitorState { hwnd, rect, width, height, renderer });
             }
         }
     } else {
         for (i, monitor) in current_monitors.iter().enumerate() {
             let rect = monitor.rect;
-            let x = rect.left - virtual_left;
-            let y = rect.top - virtual_top;
+            let mut pt = POINT { x: rect.left, y: rect.top };
+            ScreenToClient(parent_hwnd, &mut pt);
+            let x = pt.x;
+            let y = pt.y;
             let w = rect.right - rect.left;
             let h = rect.bottom - rect.top;
  
             let state = &mut monitor_states[i];
             if state.rect.left != rect.left || state.rect.top != rect.top ||
                (state.width != w || state.height != h) {
-                
-                crate::app::log_msg(&format!("Monitor {} resized/moved from ({}, {}) {}x{} to ({}, {}) {}x{}. Adjusting window.", 
-                    i, state.rect.left, state.rect.top, state.width, state.height, rect.left, rect.top, w, h));
-                
                 SetWindowPos(state.hwnd, 1, x, y, w, h, SWP_NOACTIVATE);
                 state.rect = rect;
                 state.width = w;
                 state.height = h;
+                state.renderer.resize(device, w as usize, h as usize, rect, v_rect);
             }
         }
     }
 }
+
 
 pub unsafe fn register_wallpaper_class(hinstance: HINSTANCE, wnd_proc: WNDPROC) -> BOOL {
     use rand::Rng;

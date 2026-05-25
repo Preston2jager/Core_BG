@@ -337,6 +337,7 @@ fn main() {
         let target_duration = std::time::Duration::from_nanos(1_000_000_000 / fps as u64);
         let now = std::time::Instant::now();
 
+        // Use a 3-frame buffer to prevent large jumps if the system hangs briefly
         if now.duration_since(last_tick) > target_duration * 3 {
             last_tick = now - target_duration;
         }
@@ -344,11 +345,15 @@ fn main() {
         let elapsed = now.duration_since(last_tick);
 
         if elapsed >= target_duration {
+            // Revert to fixed timestep for visual smoothness. 
+            // This ensures every frame advances the simulation by exactly one frame's worth of time,
+            // which is critical for jitter-free animation on Windows desktop.
             let delta_time = target_duration.as_secs_f32();
             last_tick += target_duration;
             frame_count += 1;
 
-            if now.duration_since(last_cpu_poll) >= std::time::Duration::from_secs(1) {
+            // Poll CPU more frequently (every 200ms) for better responsiveness
+            if now.duration_since(last_cpu_poll) >= std::time::Duration::from_millis(200) {
                 app.cpu_monitor.refresh();
                 overall_cpu = app.cpu_monitor.get_overall_usage();
                 last_cpu_poll = now;
