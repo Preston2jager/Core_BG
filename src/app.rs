@@ -43,7 +43,6 @@ pub struct AppState {
     // Thread communication flags
     pub pending_refresh: bool,
     pub pending_logo_update: bool,
-    pub pending_settings_show: bool,
 }
 
 pub static STATE: Mutex<AppState> = Mutex::new(AppState {
@@ -57,7 +56,6 @@ pub static STATE: Mutex<AppState> = Mutex::new(AppState {
 
     pending_refresh: false,
     pending_logo_update: false,
-    pending_settings_show: false,
 });
 
 pub fn save_settings(state: &AppState) {
@@ -86,7 +84,6 @@ pub fn load_settings() -> AppState {
         bg_effect_enabled: true,
         pending_refresh: false,
         pending_logo_update: false,
-        pending_settings_show: false,
     };
     
     if let Ok(mut file) = File::open("settings.txt") {

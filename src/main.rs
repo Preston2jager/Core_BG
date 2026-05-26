@@ -5,7 +5,6 @@ mod cpu;
 mod tray;
 mod renderer;
 mod app;
-mod settings_win;
 
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -76,17 +75,38 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
         tray::WM_TRAY_CALLBACK => {
             let event = lparam as u32;
             if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
-                let bg_effect_enabled = {
+                let (bg_effect_enabled, color_preset) = {
                     let state = STATE.lock().unwrap();
-                    state.bg_effect_enabled
+                    (state.bg_effect_enabled, state.color_preset)
                 };
-                tray::show_context_menu(hwnd, bg_effect_enabled);
+                tray::show_context_menu(hwnd, bg_effect_enabled, color_preset);
             }
             0
         }
         WM_COMMAND => {
             let id = (wparam & 0xFFFF) as usize;
             log_msg(&format!("TrayWndProc: WM_COMMAND received, id = {}", id));
+            
+            if id >= tray::ID_COLOR_BASE && id < tray::ID_COLOR_BASE + 10 {
+                let mut state = STATE.lock().unwrap();
+                state.color_preset = match id - tray::ID_COLOR_BASE {
+                    0 => crate::app::ColorPreset::AtomicStarlink,
+                    1 => crate::app::ColorPreset::Cyberpunk,
+                    2 => crate::app::ColorPreset::AcidGreen,
+                    3 => crate::app::ColorPreset::SolarFlame,
+                    4 => crate::app::ColorPreset::DeepOcean,
+                    5 => crate::app::ColorPreset::EmeraldPulse,
+                    6 => crate::app::ColorPreset::CrimsonNova,
+                    7 => crate::app::ColorPreset::VioletNight,
+                    8 => crate::app::ColorPreset::AmberGhost,
+                    9 => crate::app::ColorPreset::FrostByte,
+                    _ => crate::app::ColorPreset::AtomicStarlink,
+                };
+                log_msg(&format!("Menu: Color Preset changed to {:?}", state.color_preset));
+                app::save_settings(&state);
+                return 0;
+            }
+
             match id {
                 tray::ID_EXIT => {
                     log_msg("Menu: Exit clicked");
@@ -96,10 +116,6 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
                 tray::ID_REFRESH => {
                     log_msg("Menu: Refresh Wallpaper clicked");
                     STATE.lock().unwrap().pending_refresh = true;
-                }
-                tray::ID_SETTINGS => {
-                    log_msg("Menu: Color Presets clicked");
-                    STATE.lock().unwrap().pending_settings_show = true;
                 }
                 tray::ID_BG_EFFECT => {
                     let mut state = STATE.lock().unwrap();
@@ -207,8 +223,8 @@ fn main() {
         }
         let tray_hwnd = CreateWindowExW(
             0,
-            to_wide("BGCoreV2TrayClass").as_ptr(),
-            to_wide("BGCoreV2TrayWindow").as_ptr(),
+            to_wide("StarCoreTrayClass").as_ptr(),
+            to_wide("StarCoreTrayWindow").as_ptr(),
             WS_POPUP,
             0,
             0,
@@ -298,12 +314,11 @@ fn main() {
         }
 
         // Check thread communication flags
-        let (pending_refresh, pending_logo_update, pending_settings_show) = {
+        let (pending_refresh, pending_logo_update) = {
             let mut state = STATE.lock().unwrap();
-            let r = (state.pending_refresh, state.pending_logo_update, state.pending_settings_show);
+            let r = (state.pending_refresh, state.pending_logo_update);
             state.pending_refresh = false;
             state.pending_logo_update = false;
-            state.pending_settings_show = false;
             r
         };
         if pending_refresh {
@@ -311,12 +326,6 @@ fn main() {
         }
         if pending_logo_update {
             app.update_logo();
-        }
-        if pending_settings_show {
-            unsafe {
-                let hinst = GetModuleHandleW(std::ptr::null());
-                settings_win::show_settings_window(hinst);
-            }
         }
 
         if STATE.lock().unwrap().should_exit {

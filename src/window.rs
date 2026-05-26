@@ -108,7 +108,7 @@ pub unsafe fn get_desktop_info() -> DesktopInfo {
 }
 
 pub unsafe fn register_tray_class(hinstance: HINSTANCE, wnd_proc: WNDPROC) -> BOOL {
-    let class_name = to_wide("BGCoreV2TrayClass");
+    let class_name = to_wide("StarCoreTrayClass");
     let wc = WNDCLASSW {
         style: CS_HREDRAW | CS_VREDRAW,
         lpfnWndProc: wnd_proc,
@@ -313,7 +313,7 @@ pub unsafe fn register_wallpaper_class(hinstance: HINSTANCE, wnd_proc: WNDPROC) 
     use rand::Rng;
     let mut rng = rand::thread_rng();
     let class_id: u32 = rng.gen();
-    let class_name_str = format!("BGCoreV2WallpaperClass_{}", class_id);
+    let class_name_str = format!("StarCoreWallpaperClass_{}", class_id);
     let class_name = to_wide(&class_name_str);
     
     // Store class name globally or pass it around? 

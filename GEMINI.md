@@ -1,63 +1,52 @@
-# Gemini Project Instructions: bg_core_v2
+# Gemini Project Instructions: StarCore
 
-This document provides context and instructions for AI agents working on the `bg_core_v2` project.
+This document provides context and instructions for AI agents working on the **StarCore** project.
 
 ## Project Overview
 
-`bg_core_v2` is a high-performance live wallpaper application for Windows, written in Rust. It visualizes real-time CPU activity through an interactive particle system rendered using `wgpu`.
+**StarCore** is a high-performance live wallpaper application for Windows, written in Rust. It visualizes real-time CPU activity through an interactive "Atomic Starlink" particle system rendered using `wgpu`.
 
 ### Key Features
-- **CPU Visualization (v2.0 "Atomic Starlink"):** 24 glowing spheres orbit in a dense, spherical Starlink-style constellation. Movement speed and colors are synced to overall system load.
-- **Dynamic Particle Spray:** Cores emit high-energy particles (Sparks) and persistent tails when CPU load increases.
-- **Smooth Load Transitions:** Visual changes (color, speed, atmospherics) are interpolated per-frame for maximum smoothness.
-- **Desktop Integration:** Parents windows to the Windows desktop background, sitting behind icons.
-- **Multi-Monitor Support:** Detects monitor layout and spawns an independent rendering window for each monitor with 1:1 aspect ratio mapping.
-- **High Performance:** Uses High Process Priority and optimized `wgpu` instancing to remain fluid under 100% system load.
-- **Tray Management:** Context menu for Color Presets, FPS (30/60), and Wallpaper Load Effect toggle.
+- **Atomic Starlink Visualization (v0.1):** 24 glowing spheres orbit in a dense, spherical constellation. Movement speed and colors are dynamically synced to overall system load.
+- **Dynamic Particle Physics:** Cores emit high-energy sparks and persistent tails. Tail alignment is calculated based on movement vectors for a "rocket exhaust" effect.
+- **Automatic Wallpaper Integration:** 
+  - Automatically detects and reads the system's wallpaper fit style (Stretch, Fill, Center) from the Windows Registry.
+  - Parents windows directly to the Windows desktop background.
+- **Multi-Monitor Support:** Detects monitor layout and spawns an independent rendering window for each screen with pixel-perfect aspect ratio mapping.
+- **High-Performance Rendering:** Uses `wgpu` with optimized instancing and High Process Priority to ensure fluid animation even under 100% CPU load.
+- **StarCore Tray Management:** 
+  - **Quick Color Presets:** Switch between 10 high-contrast themes directly from the tray menu.
+  - **Wallpaper Load Effect:** Toggleable real-time background ripples and desaturation effects based on CPU stress.
 
 ## Version History
 
-### v2.3 - "Aesthetic & Atmospheric Refinement" (Current)
+### v0.1 - "The First Star" (Current)
+- **Rebranding**: Officially named **StarCore**. Consolidated versioning to v0.1.
+- **Automatic Fit**: Implemented Registry-based wallpaper style detection (Stretch/Fill/Center).
+- **Tray UI Refinement**: Moved Color Presets to the primary context menu for easier access.
+- **Code Optimization**: Cleaned up unused WGPU/DComp variables and resolved compiler warnings.
 - **Visuals**: 
-  - Central Logo: Doubled in size and implemented high-contrast color logic per preset.
-  - Particle Tails: Redesigned to align with core movement direction; increased thickness and added chaotic jitter (Rocket Exhaust effect).
-  - Spark Effects: Increased frequency and segment count; switched to contrast colors for maximum visibility.
-  - Background FX: Improved 2D chaotic noise to eliminate jitter texture; implemented dramatic slow-motion ripples (1.5s period).
-- **Atmosphere**: Implemented global linear screen darkening synchronized with desaturation during high CPU load.
-- **Smart Mapping**: Transitioned from UV Span to independent per-monitor wallpaper mapping, ensuring correct aspect ratio on all screens.
-- **UI/UX**: Simplified tray menu and settings window by hardcoding visual proportions and focusing on core color/effect controls.
+  - High-contrast Central Logo logic.
+  - Movement-aligned particle tails with chaotic jitter.
+  - Atmospheric background effects (Ripples, Desaturation, Darkening).
 
-### v2.2 - "High-Fidelity Wallpaper Rendering"
-- **Visuals**: Restored high-definition desktop wallpaper rendering using a full-screen background quad with 1:1 pixel mapping.
-- **Clarity Optimization**: Removed rendering resolution caps; implemented native resolution rendering for ultra-sharp visuals on 2K/4K displays.
-- **Lossless Assets**: Wallpaper is loaded at original resolution with zero compression. Applied 16x Anisotropic Filtering.
-- **Stability**: Upgraded to a DirectComposition (DComp) visual tree windowing architecture.
-
-### v2.1 - "Opaque Wallpaper Rendering"
-- **Visuals**: Removed background starfield; moved the atomic constellation to the top-right corner (legacy).
-- **Transparency Solution**: Queries the Windows active wallpaper file via `SPI_GETDESKWALLPAPER`.
-- **Memory Optimization**: Automatically downscales high-resolution wallpaper images using thumbnail downscaling.
-- **Stability**: Bypassed OS composition bugs using `wgpu::CompositeAlphaMode::Opaque`.
-
-### v2.0 - "Atomic Starlink"
-- **Visualization**: Switched from planar orbits to a 3D spherical "Starlink" distribution with 24 cores.
-- **Performance**: Implemented High Process Priority logic in `main.rs`.
-- **Depth Fix**: Remapped Z-coordinates in the shader to prevent clipping.
+---
+*Legacy Note: This project evolved from the `bg_core_v2` research prototype.*
 
 ## Technical Architecture
 
-- **`src/main.rs`**: Orchestrator. Handles Win32 windowing, tray management, and the main loop.
-- **`src/renderer.rs`**: `wgpu` pipeline. Implements spherical orbits, movement-aligned particle physics, high-contrast logo rendering, and dynamic background atmospherics (noise, ripples, darkening).
-- **`src/window.rs`**: Monitor detection and DirectComposition target management.
-- **`src/cpu.rs`**: Win32 monitor using `GetSystemTimes` and `NtQuerySystemInformation`.
-- **`src/app.rs`**: App state management (Color Presets, FPS, BG Toggles) and global logging.
-- **`src/settings_win.rs`**: Compact Win32 settings interface for effect adjustments.
-- **`src/tray.rs`**: System tray context menu management.
+- **`src/main.rs`**: Orchestrator. Handles Win32 windowing, tray management, and the high-precision event loop.
+- **`src/renderer.rs`**: Core `wgpu` engine. Implements the WGSL shader, particle physics, Registry-based wallpaper mapping, and atmospheric effects.
+- **`src/window.rs`**: Win32 windowing helpers, DPI awareness, and monitor layout detection.
+- **`src/cpu.rs`**: High-frequency CPU monitor using low-level Win32 APIs.
+- **`src/app.rs`**: Application state, color preset definitions, and settings persistence.
+- **`src/tray.rs`**: StarCore tray icon and context menu management.
+- **`src/settings_win.rs`**: Win32 settings dialog for advanced configurations.
 
 ## Build and Run
 
-- **Run**: `cargo run --release` (Highly recommended for performance).
+- **Run**: `cargo run --release` (Mandatory for smooth performance).
 - **Build**: `cargo build --release`.
 
 ## Logging
-Output is written to `wallpaper_new.log` (and legacy `wallpaper.log`).
+Primary output is written to `wallpaper_new.log`.

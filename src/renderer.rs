@@ -1,5 +1,6 @@
 use rand::Rng;
 use windows_sys::Win32::Foundation::{HWND, HINSTANCE};
+use image::GenericImageView;
 
 const MAX_INSTANCES: usize = 15000;
 const NUM_CORES: usize = 24;
@@ -290,36 +291,62 @@ pub struct Particle {
 
 pub struct CoreConfig { pub u: [f32; 3], pub v: [f32; 3], pub orbit_mult: f32 }
 
+fn get_wallpaper_style() -> (String, String) {
+    use windows_sys::Win32::System::Registry::*;
+
+    let mut style = "10".to_string();
+    let mut tile = "0".to_string();
+
+    unsafe {
+        let mut hkey: HKEY = 0;
+        let subkey = crate::window::to_wide("Control Panel\\Desktop");
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey) == 0 {
+            let mut buf = [0u16; 32];
+            let mut len = (buf.len() * 2) as u32;
+            let style_name = crate::window::to_wide("WallpaperStyle");
+            if RegQueryValueExW(hkey, style_name.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), buf.as_mut_ptr() as *mut u8, &mut len) == 0 {
+                style = String::from_utf16_lossy(&buf[..(len as usize / 2)]).trim_matches('\0').to_string();
+            }
+            let mut len = (buf.len() * 2) as u32;
+            let tile_name = crate::window::to_wide("TileWallpaper");
+            if RegQueryValueExW(hkey, tile_name.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), buf.as_mut_ptr() as *mut u8, &mut len) == 0 {
+                tile = String::from_utf16_lossy(&buf[..(len as usize / 2)]).trim_matches('\0').to_string();
+            }
+            RegCloseKey(hkey);
+        }
+    }
+    (style, tile)
+}
+
 fn load_wallpaper() -> (u32, u32, Vec<u8>, bool) {
-    if let Ok(app_data) = std::env::var("APPDATA") {
+    let mut img = if let Ok(app_data) = std::env::var("APPDATA") {
         let transcoded_path = std::path::Path::new(&app_data).join("Microsoft").join("Windows").join("Themes").join("TranscodedWallpaper");
         if transcoded_path.exists() {
             if let Ok(file) = std::fs::File::open(&transcoded_path) {
                 let reader = std::io::BufReader::new(file);
-                if let Ok(img_reader) = image::ImageReader::new(reader).with_guessed_format() {
-                    if let Ok(img) = img_reader.decode() {
-                        let rgba = img.to_rgba8(); let (w, h) = rgba.dimensions();
-                        return (w, h, rgba.into_raw(), true);
-                    }
-                }
+                image::ImageReader::new(reader).with_guessed_format().ok().and_then(|r| r.decode().ok())
+            } else { None }
+        } else { None }
+    } else { None };
+
+    if img.is_none() {
+        let mut buf = [0u16; 512];
+        let path = unsafe {
+            let res = windows_sys::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(windows_sys::Win32::UI::WindowsAndMessaging::SPI_GETDESKWALLPAPER, buf.len() as u32, buf.as_mut_ptr() as *mut std::ffi::c_void, 0);
+            if res != 0 { let len = buf.iter().position(|&x| x == 0).unwrap_or(buf.len()); Some(String::from_utf16_lossy(&buf[..len])) } else { None }
+        };
+        if let Some(p) = path {
+            if let Ok(file) = std::fs::File::open(p) {
+                let reader = std::io::BufReader::new(file);
+                img = image::ImageReader::new(reader).with_guessed_format().ok().and_then(|r| r.decode().ok());
             }
         }
     }
-    let mut buf = [0u16; 512];
-    let path = unsafe {
-        let res = windows_sys::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(windows_sys::Win32::UI::WindowsAndMessaging::SPI_GETDESKWALLPAPER, buf.len() as u32, buf.as_mut_ptr() as *mut std::ffi::c_void, 0);
-        if res != 0 { let len = buf.iter().position(|&x| x == 0).unwrap_or(buf.len()); let path_str = String::from_utf16_lossy(&buf[..len]); if !path_str.trim().is_empty() { Some(path_str) } else { None } } else { None }
-    };
-    if let Some(ref p) = path {
-        if let Ok(file) = std::fs::File::open(p) {
-            let reader = std::io::BufReader::new(file);
-            if let Ok(img_reader) = image::ImageReader::new(reader).with_guessed_format() {
-                if let Ok(img) = img_reader.decode() {
-                    let rgba = img.to_rgba8(); let (w, h) = rgba.dimensions();
-                    return (w, h, rgba.into_raw(), false);
-                }
-            }
-        }
+
+    if let Some(decoded) = img {
+        let rgba = decoded.to_rgba8();
+        let (fw, fh) = rgba.dimensions();
+        return (fw, fh, rgba.into_raw(), true);
     }
     (1, 1, vec![0, 0, 0, 255], false)
 }
@@ -346,7 +373,6 @@ pub struct SharedRenderResources {
     pub render_pipeline: wgpu::RenderPipeline, pub bind_group_layout: wgpu::BindGroupLayout,
     pub logo_texture: wgpu::Texture, pub logo_view: wgpu::TextureView, pub logo_sampler: wgpu::Sampler,
     pub wallpaper_texture: wgpu::Texture, pub wallpaper_view: wgpu::TextureView, pub wallpaper_sampler: wgpu::Sampler,
-    pub is_transcoded: bool,
 }
 
 impl SharedRenderResources {
@@ -358,7 +384,7 @@ impl SharedRenderResources {
         queue.write_texture(wgpu::ImageCopyTexture { texture: &logo_texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All }, &logo_rgba, wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(4 * 512), rows_per_image: Some(512) }, texture_size);
         let logo_view = logo_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let logo_sampler = device.create_sampler(&wgpu::SamplerDescriptor { address_mode_u: wgpu::AddressMode::ClampToEdge, address_mode_v: wgpu::AddressMode::ClampToEdge, address_mode_w: wgpu::AddressMode::ClampToEdge, mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, ..Default::default() });
-        let (wp_w, wp_h, wp_rgba, is_transcoded) = load_wallpaper();
+        let (wp_w, wp_h, wp_rgba, _is_transcoded) = load_wallpaper();
         let wp_size = wgpu::Extent3d { width: wp_w, height: wp_h, depth_or_array_layers: 1 };
         let wallpaper_texture = device.create_texture(&wgpu::TextureDescriptor { label: None, size: wp_size, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8UnormSrgb, usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[] });
         queue.write_texture(wgpu::ImageCopyTexture { texture: &wallpaper_texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All }, &wp_rgba, wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(4 * wp_w), rows_per_image: Some(wp_h) }, wp_size);
@@ -373,7 +399,7 @@ impl SharedRenderResources {
         ] });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[&bind_group_layout], push_constant_ranges: &[] });
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor { label: None, layout: Some(&pipeline_layout), vertex: wgpu::VertexState { module: &shader, entry_point: "vs_main", compilation_options: Default::default(), buffers: &[GpuInstance::desc()] }, fragment: Some(wgpu::FragmentState { module: &shader, entry_point: "fs_main", compilation_options: Default::default(), targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })] }), primitive: wgpu::PrimitiveState::default(), depth_stencil: None, multisample: wgpu::MultisampleState::default(), multiview: None, cache: None });
-        Self { render_pipeline, bind_group_layout, logo_texture, logo_view, logo_sampler, wallpaper_texture, wallpaper_view, wallpaper_sampler, is_transcoded }
+        Self { render_pipeline, bind_group_layout, logo_texture, logo_view, logo_sampler, wallpaper_texture, wallpaper_view, wallpaper_sampler }
     }
 }
 
@@ -383,9 +409,6 @@ pub struct Renderer {
     pub surface: wgpu::Surface<'static>, pub surface_config: wgpu::SurfaceConfiguration,
     pub instance_buffer: wgpu::Buffer, pub uniform_buffer: wgpu::Buffer, pub uniform_bind_group: wgpu::BindGroup,
     pub shared_resources: std::sync::Arc<SharedRenderResources>,
-    pub dcomp_device: windows::Win32::Graphics::DirectComposition::IDCompositionDevice,
-    pub dcomp_target: windows::Win32::Graphics::DirectComposition::IDCompositionTarget,
-    pub dcomp_visual: windows::Win32::Graphics::DirectComposition::IDCompositionVisual,
     pub win_w: f32, pub win_h: f32, pub monitor_rect: windows_sys::Win32::Foundation::RECT, pub monitor_total_rect: windows_sys::Win32::Foundation::RECT,
     pub wp_offset_scale: [f32; 4], pub core_flicker_timers: [f32; NUM_CORES], pub core_flicker_durations: [f32; NUM_CORES], pub core_flicker_targets: [[f32; 4]; NUM_CORES], pub core_colors: [[f32; 4]; NUM_CORES],
 }
@@ -409,13 +432,6 @@ impl Renderer {
             let mut win_handle = raw_window_handle::Win32WindowHandle::new(hwnd_val); win_handle.hinstance = std::num::NonZeroIsize::new(hinstance as isize);
             instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle { raw_display_handle: raw_window_handle::RawDisplayHandle::Windows(raw_window_handle::WindowsDisplayHandle::new()), raw_window_handle: raw_window_handle::RawWindowHandle::Win32(win_handle) })
         }.expect("Surface fail");
-        let (dcomp_device, dcomp_target, dcomp_visual) = unsafe {
-            use windows::Win32::Graphics::DirectComposition::*; use windows::Win32::Foundation::HWND;
-            let dcomp_device: IDCompositionDevice = DCompositionCreateDevice(None).expect("DComp device fail");
-            let dcomp_target = dcomp_device.CreateTargetForHwnd(HWND(hwnd as isize), true).expect("DComp target fail");
-            let dcomp_visual = dcomp_device.CreateVisual().expect("DComp visual fail");
-            (dcomp_device, dcomp_target, dcomp_visual)
-        };
         let caps = surface.get_capabilities(adapter); let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
         let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) { wgpu::CompositeAlphaMode::PreMultiplied } else if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque) { wgpu::CompositeAlphaMode::Opaque } else { caps.alpha_modes[0] };
         let surface_config = wgpu::SurfaceConfiguration { usage: wgpu::TextureUsages::RENDER_ATTACHMENT, format, width: render_w as u32, height: render_h as u32, present_mode: wgpu::PresentMode::Fifo, alpha_mode, view_formats: vec![], desired_maximum_frame_latency: 2 };
@@ -423,7 +439,7 @@ impl Renderer {
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (MAX_INSTANCES * 64) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &shared_resources.bind_group_layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shared_resources.logo_view) }, wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shared_resources.logo_sampler) }, wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&shared_resources.wallpaper_view) }, wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&shared_resources.wallpaper_sampler) }] });
-        let mut renderer = Self { width: render_w, height: render_h, smoothed_load: 0.0, time: 0.0, config_glow: 1, particles: Vec::with_capacity(4000), core_angles, core_configs, surface, surface_config, instance_buffer, uniform_buffer, uniform_bind_group, shared_resources, dcomp_device, dcomp_target, dcomp_visual, win_w, win_h, monitor_rect, monitor_total_rect, wp_offset_scale: [0.0; 4], core_flicker_timers: [0.0; NUM_CORES], core_flicker_durations: [1.0; NUM_CORES], core_flicker_targets: [[0.0; 4]; NUM_CORES], core_colors: [[0.0; 4]; NUM_CORES] };
+        let mut renderer = Self { width: render_w, height: render_h, smoothed_load: 0.0, time: 0.0, config_glow: 1, particles: Vec::with_capacity(4000), core_angles, core_configs, surface, surface_config, instance_buffer, uniform_buffer, uniform_bind_group, shared_resources, win_w, win_h, monitor_rect, monitor_total_rect, wp_offset_scale: [0.0; 4], core_flicker_timers: [0.0; NUM_CORES], core_flicker_durations: [1.0; NUM_CORES], core_flicker_targets: [[0.0; 4]; NUM_CORES], core_colors: [[0.0; 4]; NUM_CORES] };
         renderer.update_wp_mapping(); renderer
     }
 
@@ -431,12 +447,29 @@ impl Renderer {
         let (tex_w, tex_h) = (self.shared_resources.wallpaper_texture.width() as f64, self.shared_resources.wallpaper_texture.height() as f64);
         let win_w = self.win_w as f64; let win_h = self.win_h as f64;
         let screen_aspect = win_w / win_h; let tex_aspect = tex_w / tex_h;
-        let v_bias = 0.44; 
-        let (scale_x, scale_y, off_x, off_y) = if self.shared_resources.is_transcoded {
-            if (tex_w - win_w).abs() < 1.0 && (tex_h - win_h).abs() < 1.0 { (1.0, 1.0, 0.0, 0.0) } else { if tex_aspect > screen_aspect { let s_x = (tex_h * screen_aspect) / tex_w; (s_x, 1.0, (1.0 - s_x) * 0.5, 0.0) } else { let s_y = (tex_w / screen_aspect) / tex_h; (1.0, s_y, 0.0, (1.0 - s_y) * v_bias) } }
+        
+        let (style, tile) = get_wallpaper_style();
+        
+        let (scale_x, scale_y, off_x, off_y) = if style == "2" && tile == "0" {
+            // Stretch
+            (1.0, 1.0, 0.0, 0.0)
+        } else if style == "0" && tile == "0" {
+            // Center
+            let s_x = win_w / tex_w;
+            let s_y = win_h / tex_h;
+            (s_x, s_y, (1.0 - s_x) * 0.5, (1.0 - s_y) * 0.5)
         } else {
-            if tex_aspect > screen_aspect { let s_x = (tex_h * screen_aspect) / tex_w; (s_x, 1.0, (1.0 - s_x) * 0.5, 0.0) } else { let s_y = (tex_w / screen_aspect) / tex_h; (1.0, s_y, 0.0, (1.0 - s_y) * v_bias) }
+            // Default to Fill logic
+            let v_bias = 0.44; 
+            if tex_aspect > screen_aspect { 
+                let s_x = (tex_h * screen_aspect) / tex_w; 
+                (s_x, 1.0, (1.0 - s_x) * 0.5, 0.0) 
+            } else { 
+                let s_y = (tex_w / screen_aspect) / tex_h; 
+                (1.0, s_y, 0.0, (1.0 - s_y) * v_bias) 
+            }
         };
+
         self.wp_offset_scale = [off_x as f32, off_y as f32, scale_x as f32, scale_y as f32];
     }
 
