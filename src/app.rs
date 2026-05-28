@@ -1,5 +1,11 @@
 use crate::gpu_ssh::GpuSshMonitor;
 use crate::renderer::Renderer;
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum MonitorSource {
+    LocalCpu,
+    RemoteGpuSsh,
+}
 use crate::window::{self, DesktopInfo};
 use windows_sys::Win32::Foundation::*;
 use std::sync::Mutex;
@@ -43,6 +49,8 @@ pub struct AppState {
     pub offset_x: f32,
     pub offset_y: f32,
 
+    pub monitor_source: MonitorSource,
+
     // Thread communication flags
     pub pending_refresh: bool,
     pub pending_logo_update: bool,
@@ -60,6 +68,8 @@ pub static STATE: Mutex<AppState> = Mutex::new(AppState {
     offset_x: 0.0,
     offset_y: 0.0,
 
+    monitor_source: MonitorSource::RemoteGpuSsh,
+
     pending_refresh: false,
     pending_logo_update: false,
 });
@@ -71,13 +81,15 @@ pub fn save_settings(state: &AppState) {
          glow={}\n\
          bg_effect_enabled={}\n\
          offset_x={}\n\
-         offset_y={}\n",
+         offset_y={}\n\
+         monitor_source={:?}\n",
         state.color_preset,
         state.fps,
         state.glow,
         state.bg_effect_enabled,
         state.offset_x,
         state.offset_y,
+        state.monitor_source,
     );
     if let Ok(mut file) = File::create("settings.txt") {
         let _ = file.write_all(content.as_bytes());
@@ -94,6 +106,7 @@ pub fn load_settings() -> AppState {
         bg_effect_enabled: true,
         offset_x: 0.0,
         offset_y: 0.0,
+        monitor_source: MonitorSource::RemoteGpuSsh,
         pending_refresh: false,
         pending_logo_update: false,
     };
@@ -126,6 +139,12 @@ pub fn load_settings() -> AppState {
                                 _ => ColorPreset::AtomicStarlink,
                             };
                         }
+                        "monitor_source" => {
+                            state.monitor_source = match val {
+                                "LocalCpu" => MonitorSource::LocalCpu,
+                                _ => MonitorSource::RemoteGpuSsh,
+                            };
+                        }
                         _ => {}
                     }
                 }
@@ -153,6 +172,7 @@ pub struct WallpaperApp {
     pub monitor_states: Vec<MonitorState>,
     pub desktop_info: DesktopInfo,
     pub gpu_monitor: GpuSshMonitor,
+    pub cpu_monitor: crate::cpu::CpuMonitor,
     pub shared_resources: Option<std::sync::Arc<crate::renderer::SharedRenderResources>>,
 }
 
@@ -185,6 +205,7 @@ impl WallpaperApp {
 
         let desktop_info = unsafe { window::get_desktop_info() };
         let gpu_monitor = GpuSshMonitor::new();
+        let cpu_monitor = crate::cpu::CpuMonitor::new();
 
         Self {
             instance,
@@ -195,6 +216,7 @@ impl WallpaperApp {
             monitor_states: Vec::new(),
             desktop_info,
             gpu_monitor,
+            cpu_monitor,
             shared_resources: None,
         }
     }

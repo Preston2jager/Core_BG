@@ -5,6 +5,7 @@ mod gpu_ssh;
 mod tray;
 mod renderer;
 mod app;
+mod cpu;
 
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -95,16 +96,16 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
         tray::WM_TRAY_CALLBACK => {
             let event = lparam as u32;
             if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
-                let (bg_effect_enabled, color_preset) = {
+                let (bg_effect_enabled, color_preset, monitor_source) = {
                     let state = STATE.lock().unwrap();
-                    (state.bg_effect_enabled, state.color_preset)
+                    (state.bg_effect_enabled, state.color_preset, state.monitor_source)
                 };
                 let connected = if !APP_PTR.is_null() {
                     (*APP_PTR).gpu_monitor.is_connected()
                 } else {
                     false
                 };
-                tray::show_context_menu(hwnd, bg_effect_enabled, color_preset, connected);
+                tray::show_context_menu(hwnd, bg_effect_enabled, color_preset, connected, monitor_source);
             }
             0
         }
@@ -135,6 +136,10 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
             match id {
                 tray::ID_EXIT => {
                     log_msg("Menu: Exit clicked");
+                    {
+                        let state = STATE.lock().unwrap();
+                        app::save_settings(&state);
+                    }
                     STATE.lock().unwrap().should_exit = true;
                     PostQuitMessage(0);
                 }
@@ -167,6 +172,18 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
                         .arg(".")
                         .creation_flags(CREATE_NO_WINDOW)
                         .spawn();
+                }
+                tray::ID_SOURCE_SSH => {
+                    let mut state = STATE.lock().unwrap();
+                    state.monitor_source = crate::app::MonitorSource::RemoteGpuSsh;
+                    log_msg("Menu: Monitor Source changed to Remote GPU (SSH)");
+                    app::save_settings(&state);
+                }
+                tray::ID_SOURCE_CPU => {
+                    let mut state = STATE.lock().unwrap();
+                    state.monitor_source = crate::app::MonitorSource::LocalCpu;
+                    log_msg("Menu: Monitor Source changed to Local CPU");
+                    app::save_settings(&state);
                 }
                 _ => {}
             }
@@ -346,7 +363,12 @@ fn main() {
     let mut log_timer = std::time::Instant::now();
 
     app.gpu_monitor.refresh();
-    let mut gpu_load = app.gpu_monitor.get_overall_usage();
+    app.cpu_monitor.refresh();
+    let mut gpu_load = if STATE.lock().unwrap().monitor_source == crate::app::MonitorSource::RemoteGpuSsh && app.gpu_monitor.is_connected() {
+        app.gpu_monitor.get_overall_usage()
+    } else {
+        app.cpu_monitor.get_overall_usage()
+    };
 
     log_msg("Entering event loop");
 
@@ -409,7 +431,26 @@ fn main() {
             // Poll GPU more frequently (every 200ms) for better responsiveness
             if now.duration_since(last_gpu_poll) >= std::time::Duration::from_millis(200) {
                 app.gpu_monitor.refresh();
-                gpu_load = app.gpu_monitor.get_overall_usage();
+                app.cpu_monitor.refresh();
+                
+                let (source, is_ssh_connected) = {
+                    let s = STATE.lock().unwrap();
+                    (s.monitor_source, app.gpu_monitor.is_connected())
+                };
+                
+                gpu_load = match source {
+                    crate::app::MonitorSource::RemoteGpuSsh => {
+                        if is_ssh_connected {
+                            app.gpu_monitor.get_overall_usage()
+                        } else {
+                            app.cpu_monitor.get_overall_usage()
+                        }
+                    }
+                    crate::app::MonitorSource::LocalCpu => {
+                        app.cpu_monitor.get_overall_usage()
+                    }
+                };
+                
                 last_gpu_poll = now;
 
                 // Monitor check logic
@@ -424,10 +465,10 @@ fn main() {
                                 || app.monitor_states[i].rect.top != m.rect.top
                                 || app.monitor_states[i].rect.right != m.rect.right
                                 || app.monitor_states[i].rect.bottom != m.rect.bottom
-                            {
-                                changed = true;
-                                break;
-                            }
+                                {
+                                    changed = true;
+                                    break;
+                                }
                         }
                         changed
                     }
@@ -449,12 +490,23 @@ fn main() {
             if now.duration_since(log_timer) >= std::time::Duration::from_secs(5) {
                 if !app.monitor_states.is_empty() {
                     let first = &app.monitor_states[0];
+                    let (source, is_ssh_connected) = {
+                        let s = STATE.lock().unwrap();
+                        (s.monitor_source, app.gpu_monitor.is_connected())
+                    };
+                    let mode_str = match source {
+                        crate::app::MonitorSource::RemoteGpuSsh => {
+                            if is_ssh_connected { "GPU (SSH)" } else { "CPU (Fallback)" }
+                        }
+                        crate::app::MonitorSource::LocalCpu => "CPU",
+                    };
                     log_msg(&format!(
-                        "Stats: Rendered {} frames in 5s. Screens: {}. Primary: {}x{}. GPU: {:.1}%",
+                        "Stats: Rendered {} frames in 5s. Screens: {}. Primary: {}x{}. Source: {}. Load: {:.1}%",
                         frame_count,
                         app.monitor_states.len(),
                         first.width,
                         first.height,
+                        mode_str,
                         gpu_load
                     ));
                 }

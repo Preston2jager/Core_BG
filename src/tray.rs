@@ -11,6 +11,8 @@ pub const ID_REFRESH: usize = 1008;
 pub const ID_BG_EFFECT: usize = 1010;
 pub const ID_SET_OFFSET: usize = 1012;
 pub const ID_OPEN_FOLDER: usize = 1014;
+pub const ID_SOURCE_SSH: usize = 1016;
+pub const ID_SOURCE_CPU: usize = 1018;
 
 // Color Preset IDs (1100 - 1109)
 pub const ID_COLOR_BASE: usize = 1100;
@@ -47,6 +49,7 @@ pub unsafe fn show_context_menu(
     bg_effect_enabled: bool,
     current_preset: crate::app::ColorPreset,
     ssh_connected: bool,
+    monitor_source: crate::app::MonitorSource,
 ) {
     let mut point = POINT { x: 0, y: 0 };
     GetCursorPos(&mut point);
@@ -56,9 +59,16 @@ pub unsafe fn show_context_menu(
         return;
     }
 
-    // 0. Connection Status
+    // 0. Connection Status & Source selection
     let status_text = if ssh_connected { "SSH Server: Connected" } else { "SSH Server: Disconnected" };
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, to_wide(status_text).as_ptr());
+    
+    let ssh_flags = if monitor_source == crate::app::MonitorSource::RemoteGpuSsh { MF_STRING | MF_CHECKED } else { MF_STRING };
+    AppendMenuW(menu, ssh_flags, ID_SOURCE_SSH, to_wide("Monitor: Remote GPU (SSH)").as_ptr());
+    
+    let cpu_flags = if monitor_source == crate::app::MonitorSource::LocalCpu { MF_STRING | MF_CHECKED } else { MF_STRING };
+    AppendMenuW(menu, cpu_flags, ID_SOURCE_CPU, to_wide("Monitor: Local CPU").as_ptr());
+
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
 
     // 1. Color Presets (Primary Menu)
