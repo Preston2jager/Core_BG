@@ -1,7 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod window;
-mod cpu;
+mod gpu_ssh;
 mod tray;
 mod renderer;
 mod app;
@@ -296,12 +296,12 @@ fn main() {
     };
 
     let mut last_tick = std::time::Instant::now();
-    let mut last_cpu_poll = std::time::Instant::now();
+    let mut last_gpu_poll = std::time::Instant::now();
     let mut frame_count = 0;
     let mut log_timer = std::time::Instant::now();
 
-    app.cpu_monitor.refresh();
-    let mut overall_cpu = app.cpu_monitor.get_overall_usage();
+    app.gpu_monitor.refresh();
+    let mut gpu_load = app.gpu_monitor.get_overall_usage();
 
     log_msg("Entering event loop");
 
@@ -361,11 +361,11 @@ fn main() {
             last_tick += target_duration;
             frame_count += 1;
 
-            // Poll CPU more frequently (every 200ms) for better responsiveness
-            if now.duration_since(last_cpu_poll) >= std::time::Duration::from_millis(200) {
-                app.cpu_monitor.refresh();
-                overall_cpu = app.cpu_monitor.get_overall_usage();
-                last_cpu_poll = now;
+            // Poll GPU more frequently (every 200ms) for better responsiveness
+            if now.duration_since(last_gpu_poll) >= std::time::Duration::from_millis(200) {
+                app.gpu_monitor.refresh();
+                gpu_load = app.gpu_monitor.get_overall_usage();
+                last_gpu_poll = now;
 
                 // Monitor check logic
                 let monitors_changed = unsafe {
@@ -399,18 +399,18 @@ fn main() {
                 }
             }
 
-            app.update_and_draw(delta_time, overall_cpu, glow);
+            app.update_and_draw(delta_time, gpu_load, glow);
 
             if now.duration_since(log_timer) >= std::time::Duration::from_secs(5) {
                 if !app.monitor_states.is_empty() {
                     let first = &app.monitor_states[0];
                     log_msg(&format!(
-                        "Stats: Rendered {} frames in 5s. Screens: {}. Primary: {}x{}. CPU: {:.1}%",
+                        "Stats: Rendered {} frames in 5s. Screens: {}. Primary: {}x{}. GPU: {:.1}%",
                         frame_count,
                         app.monitor_states.len(),
                         first.width,
                         first.height,
-                        overall_cpu
+                        gpu_load
                     ));
                 }
                 frame_count = 0;

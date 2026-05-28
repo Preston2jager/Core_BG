@@ -1,4 +1,4 @@
-use crate::cpu::CpuMonitor;
+use crate::gpu_ssh::GpuSshMonitor;
 use crate::renderer::Renderer;
 use crate::window::{self, DesktopInfo};
 use windows_sys::Win32::Foundation::*;
@@ -138,7 +138,7 @@ pub struct WallpaperApp {
     pub hinstance: HINSTANCE,
     pub monitor_states: Vec<MonitorState>,
     pub desktop_info: DesktopInfo,
-    pub cpu_monitor: CpuMonitor,
+    pub gpu_monitor: GpuSshMonitor,
     pub shared_resources: Option<std::sync::Arc<crate::renderer::SharedRenderResources>>,
 }
 
@@ -170,7 +170,7 @@ impl WallpaperApp {
         )).expect("Failed to create wgpu device");
 
         let desktop_info = unsafe { window::get_desktop_info() };
-        let cpu_monitor = CpuMonitor::new();
+        let gpu_monitor = GpuSshMonitor::new();
 
         Self {
             instance,
@@ -180,7 +180,7 @@ impl WallpaperApp {
             hinstance,
             monitor_states: Vec::new(),
             desktop_info,
-            cpu_monitor,
+            gpu_monitor,
             shared_resources: None,
         }
     }
