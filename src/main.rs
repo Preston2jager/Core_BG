@@ -567,10 +567,15 @@ unsafe extern "system" fn adjust_wnd_proc(hwnd: HWND, message: u32, wparam: WPAR
                 std::ptr::null(),
             );
             
-            SendMessageW(H_SLIDER_X, TBM_SETRANGEMIN, 1, -4000 as LPARAM);
-            SendMessageW(H_SLIDER_X, TBM_SETRANGEMAX, 1, 4000 as LPARAM);
-            SendMessageW(H_SLIDER_Y, TBM_SETRANGEMIN, 1, -3000 as LPARAM);
-            SendMessageW(H_SLIDER_Y, TBM_SETRANGEMAX, 1, 3000 as LPARAM);
+            let screen_w = GetSystemMetrics(0); // SM_CXSCREEN
+            let screen_h = GetSystemMetrics(1); // SM_CYSCREEN
+            let limit_x = screen_w / 2;
+            let limit_y = screen_h / 2;
+            
+            SendMessageW(H_SLIDER_X, TBM_SETRANGEMIN, 1, -limit_x as LPARAM);
+            SendMessageW(H_SLIDER_X, TBM_SETRANGEMAX, 1, limit_x as LPARAM);
+            SendMessageW(H_SLIDER_Y, TBM_SETRANGEMIN, 1, -limit_y as LPARAM);
+            SendMessageW(H_SLIDER_Y, TBM_SETRANGEMAX, 1, limit_y as LPARAM);
             
             SendMessageW(H_SLIDER_X, TBM_SETPOS, 1, cx as i32 as LPARAM);
             SendMessageW(H_SLIDER_Y, TBM_SETPOS, 1, cy as i32 as LPARAM);
