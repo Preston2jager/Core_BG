@@ -5,7 +5,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
+use std::os::windows::process::CommandExt;
 use crate::app::log_msg;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const SETTINGS_FILE: &str = "ssh_settings.txt";
 
@@ -209,6 +212,7 @@ fn spawn_ssh_process(config: &SshConfig) -> std::io::Result<std::process::Child>
         log_msg(&format!("GPU SSH Monitor: Spawning custom command: {}", custom_cmd));
         Command::new("cmd")
             .args(&["/C", custom_cmd])
+            .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -242,6 +246,7 @@ fn spawn_ssh_process(config: &SshConfig) -> std::io::Result<std::process::Child>
         
         Command::new("ssh")
             .args(&args)
+            .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
