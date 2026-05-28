@@ -13,6 +13,9 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::Sleep;
 use crate::app::{log_msg, STATE, WallpaperApp};
 use crate::window::to_wide;
+use std::os::windows::process::CommandExt;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 static mut APP_PTR: *mut WallpaperApp = std::ptr::null_mut();
 
@@ -79,7 +82,12 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
                     let state = STATE.lock().unwrap();
                     (state.bg_effect_enabled, state.color_preset)
                 };
-                tray::show_context_menu(hwnd, bg_effect_enabled, color_preset);
+                let connected = if !APP_PTR.is_null() {
+                    (*APP_PTR).gpu_monitor.is_connected()
+                } else {
+                    false
+                };
+                tray::show_context_menu(hwnd, bg_effect_enabled, color_preset, connected);
             }
             0
         }
@@ -122,6 +130,53 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
                     state.bg_effect_enabled = !state.bg_effect_enabled;
                     log_msg(&format!("Menu: Toggle Wallpaper Load Effect, now = {}", state.bg_effect_enabled));
                     app::save_settings(&state);
+                }
+                tray::ID_SET_OFFSET => {
+                    log_msg("Menu: Set Position Offset clicked");
+                    std::thread::spawn(move || {
+                        let (current_x, current_y) = {
+                            let state = STATE.lock().unwrap();
+                            (state.offset_x, state.offset_y)
+                        };
+                        let cmd_str = format!(
+                            "[void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic'); \
+                             $res = [Microsoft.VisualBasic.Interaction]::InputBox('Enter position offset as X,Y (relative to screen center 0,0):', 'Set Position Offset', '{},{}'); \
+                             if ($res) {{ Write-Output $res }}",
+                            current_x, current_y
+                        );
+                        let output = std::process::Command::new("powershell")
+                            .args(&["-Command", &cmd_str])
+                            .creation_flags(CREATE_NO_WINDOW)
+                            .stdout(std::process::Stdio::piped())
+                            .output();
+                        if let Ok(out) = output {
+                            let text = String::from_utf8_lossy(&out.stdout);
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                let parts: Vec<&str> = trimmed.split(',').collect();
+                                if parts.len() == 2 {
+                                    if let (Ok(x), Ok(y)) = (parts[0].trim().parse::<f32>(), parts[1].trim().parse::<f32>()) {
+                                        let mut state = STATE.lock().unwrap();
+                                        state.offset_x = x;
+                                        state.offset_y = y;
+                                        app::save_settings(&state);
+                                        log_msg(&format!("Offsets updated to X: {}, Y: {}", x, y));
+                                    } else {
+                                        log_msg(&format!("Failed to parse offsets from input: {}", trimmed));
+                                    }
+                                } else {
+                                    log_msg(&format!("Invalid format for offsets input: {}", trimmed));
+                                }
+                            }
+                        }
+                    });
+                }
+                tray::ID_OPEN_FOLDER => {
+                    log_msg("Menu: Open Settings Folder clicked");
+                    let _ = std::process::Command::new("explorer")
+                        .arg(".")
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .spawn();
                 }
                 _ => {}
             }

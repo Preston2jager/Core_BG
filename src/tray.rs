@@ -9,6 +9,8 @@ pub const WM_TRAY_CALLBACK: u32 = WM_USER + 1;
 pub const ID_EXIT: usize = 1001;
 pub const ID_REFRESH: usize = 1008;
 pub const ID_BG_EFFECT: usize = 1010;
+pub const ID_SET_OFFSET: usize = 1012;
+pub const ID_OPEN_FOLDER: usize = 1014;
 
 // Color Preset IDs (1100 - 1109)
 pub const ID_COLOR_BASE: usize = 1100;
@@ -44,6 +46,7 @@ pub unsafe fn show_context_menu(
     hwnd: HWND, 
     bg_effect_enabled: bool,
     current_preset: crate::app::ColorPreset,
+    ssh_connected: bool,
 ) {
     let mut point = POINT { x: 0, y: 0 };
     GetCursorPos(&mut point);
@@ -52,6 +55,11 @@ pub unsafe fn show_context_menu(
     if menu == 0 {
         return;
     }
+
+    // 0. Connection Status
+    let status_text = if ssh_connected { "SSH Server: Connected" } else { "SSH Server: Disconnected" };
+    AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, to_wide(status_text).as_ptr());
+    AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
 
     // 1. Color Presets (Primary Menu)
     let presets = [
@@ -77,6 +85,8 @@ pub unsafe fn show_context_menu(
     // 2. Toggles & Actions
     let bg_effect_flags = if bg_effect_enabled { MF_STRING | MF_CHECKED } else { MF_STRING };
     AppendMenuW(menu, bg_effect_flags, ID_BG_EFFECT, to_wide("Wallpaper Load Effect").as_ptr());
+    AppendMenuW(menu, MF_STRING, ID_SET_OFFSET, to_wide("Set Position Offset").as_ptr());
+    AppendMenuW(menu, MF_STRING, ID_OPEN_FOLDER, to_wide("Open Settings Folder").as_ptr());
     AppendMenuW(menu, MF_STRING, ID_REFRESH, to_wide("Refresh Wallpaper").as_ptr());
 
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());

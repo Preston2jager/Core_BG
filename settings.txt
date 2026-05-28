@@ -1,4 +1,4 @@
-color_preset=AcidGreen
+color_preset=CrimsonNova
 fps=60
 glow=2
 bg_effect_enabled=true

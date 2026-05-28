@@ -14,6 +14,7 @@ const SETTINGS_FILE: &str = "ssh_settings.txt";
 
 pub struct GpuSshMonitor {
     gpu_usage: Arc<AtomicU32>,
+    is_connected: Arc<std::sync::atomic::AtomicBool>,
 }
 
 struct SshConfig {
@@ -32,6 +33,8 @@ impl GpuSshMonitor {
         
         let gpu_usage = Arc::new(AtomicU32::new(0));
         let gpu_usage_clone = gpu_usage.clone();
+        let is_connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let is_connected_clone = is_connected.clone();
         
         // Ensure default settings exist
         ensure_default_settings();
@@ -41,6 +44,7 @@ impl GpuSshMonitor {
             log_msg("GPU SSH Monitor background thread started");
             
             while !should_exit_app() {
+                is_connected_clone.store(false, Ordering::Relaxed);
                 let config = match load_ssh_config() {
                     Ok(c) => c,
                     Err(e) => {
@@ -119,6 +123,7 @@ impl GpuSshMonitor {
                                 if let Ok(val) = clean_digits.parse::<f32>() {
                                     let usage = val.clamp(0.0, 100.0) as u32;
                                     gpu_usage_clone.store(usage, Ordering::Relaxed);
+                                    is_connected_clone.store(true, Ordering::Relaxed);
                                 }
                             }
                             Err(e) => {
@@ -128,6 +133,8 @@ impl GpuSshMonitor {
                         }
                     }
                 }
+                
+                is_connected_clone.store(false, Ordering::Relaxed);
                 
                 // If we get here, the stream finished or broke. Clean up.
                 log_msg("GPU SSH Monitor: SSH stream disconnected or process exited.");
@@ -149,7 +156,7 @@ impl GpuSshMonitor {
             log_msg("GPU SSH Monitor background thread exiting");
         });
         
-        Self { gpu_usage }
+        Self { gpu_usage, is_connected }
     }
     
     pub fn refresh(&mut self) {
@@ -158,6 +165,10 @@ impl GpuSshMonitor {
     
     pub fn get_overall_usage(&self) -> f32 {
         self.gpu_usage.load(Ordering::Relaxed) as f32
+    }
+    
+    pub fn is_connected(&self) -> bool {
+        self.is_connected.load(Ordering::Relaxed)
     }
 }
 

@@ -39,6 +39,9 @@ pub struct AppState {
     
     pub color_preset: ColorPreset,
     pub bg_effect_enabled: bool,
+    
+    pub offset_x: f32,
+    pub offset_y: f32,
 
     // Thread communication flags
     pub pending_refresh: bool,
@@ -53,6 +56,9 @@ pub static STATE: Mutex<AppState> = Mutex::new(AppState {
     
     color_preset: ColorPreset::AtomicStarlink,
     bg_effect_enabled: true,
+    
+    offset_x: 0.0,
+    offset_y: 0.0,
 
     pending_refresh: false,
     pending_logo_update: false,
@@ -63,11 +69,15 @@ pub fn save_settings(state: &AppState) {
         "color_preset={:?}\n\
          fps={}\n\
          glow={}\n\
-         bg_effect_enabled={}\n",
+         bg_effect_enabled={}\n\
+         offset_x={}\n\
+         offset_y={}\n",
         state.color_preset,
         state.fps,
         state.glow,
         state.bg_effect_enabled,
+        state.offset_x,
+        state.offset_y,
     );
     if let Ok(mut file) = File::create("settings.txt") {
         let _ = file.write_all(content.as_bytes());
@@ -82,6 +92,8 @@ pub fn load_settings() -> AppState {
         should_exit: false,
         color_preset: ColorPreset::AtomicStarlink,
         bg_effect_enabled: true,
+        offset_x: 0.0,
+        offset_y: 0.0,
         pending_refresh: false,
         pending_logo_update: false,
     };
@@ -98,6 +110,8 @@ pub fn load_settings() -> AppState {
                         "fps" => if let Ok(v) = val.parse::<u32>() { state.fps = v; },
                         "glow" => if let Ok(v) = val.parse::<u8>() { state.glow = v; },
                         "bg_effect_enabled" => if let Ok(v) = val.parse::<bool>() { state.bg_effect_enabled = v; },
+                        "offset_x" => if let Ok(v) = val.parse::<f32>() { state.offset_x = v; },
+                        "offset_y" => if let Ok(v) = val.parse::<f32>() { state.offset_y = v; },
                         "color_preset" => {
                             state.color_preset = match val {
                                 "Cyberpunk" => ColorPreset::Cyberpunk,
@@ -245,9 +259,9 @@ impl WallpaperApp {
     }
 
     pub fn update_and_draw(&mut self, delta_time: f32, overall_cpu: f32, glow: u8) {
-        let (color_preset, bg_effect_enabled) = {
+        let (color_preset, bg_effect_enabled, offset_x, offset_y) = {
             let s = STATE.lock().unwrap();
-            (s.color_preset, s.bg_effect_enabled)
+            (s.color_preset, s.bg_effect_enabled, s.offset_x, s.offset_y)
         };
 
         // Calculate virtual screen in physical pixels from known monitors
@@ -271,6 +285,8 @@ impl WallpaperApp {
 
         for state in &mut self.monitor_states {
             state.renderer.config_glow = glow;
+            state.renderer.offset_x = offset_x;
+            state.renderer.offset_y = offset_y;
 
             let (render_w, render_h) = window::compute_renderer_size(state.width, state.height);
             state.renderer.resize(&self.device, render_w, render_h, state.rect, v_rect);

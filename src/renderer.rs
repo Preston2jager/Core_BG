@@ -1,6 +1,5 @@
 use rand::Rng;
 use windows_sys::Win32::Foundation::{HWND, HINSTANCE};
-use image::GenericImageView;
 
 const MAX_INSTANCES: usize = 15000;
 const NUM_CORES: usize = 24;
@@ -411,6 +410,7 @@ pub struct Renderer {
     pub shared_resources: std::sync::Arc<SharedRenderResources>,
     pub win_w: f32, pub win_h: f32, pub monitor_rect: windows_sys::Win32::Foundation::RECT, pub monitor_total_rect: windows_sys::Win32::Foundation::RECT,
     pub wp_offset_scale: [f32; 4], pub core_flicker_timers: [f32; NUM_CORES], pub core_flicker_durations: [f32; NUM_CORES], pub core_flicker_targets: [[f32; 4]; NUM_CORES], pub core_colors: [[f32; 4]; NUM_CORES],
+    pub offset_x: f32, pub offset_y: f32,
 }
 
 impl Renderer {
@@ -439,7 +439,7 @@ impl Renderer {
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (MAX_INSTANCES * 64) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: &shared_resources.bind_group_layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() }, wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shared_resources.logo_view) }, wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shared_resources.logo_sampler) }, wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&shared_resources.wallpaper_view) }, wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&shared_resources.wallpaper_sampler) }] });
-        let mut renderer = Self { width: render_w, height: render_h, smoothed_load: 0.0, time: 0.0, config_glow: 1, particles: Vec::with_capacity(4000), core_angles, core_configs, surface, surface_config, instance_buffer, uniform_buffer, uniform_bind_group, shared_resources, win_w, win_h, monitor_rect, monitor_total_rect, wp_offset_scale: [0.0; 4], core_flicker_timers: [0.0; NUM_CORES], core_flicker_durations: [1.0; NUM_CORES], core_flicker_targets: [[0.0; 4]; NUM_CORES], core_colors: [[0.0; 4]; NUM_CORES] };
+        let mut renderer = Self { width: render_w, height: render_h, smoothed_load: 0.0, time: 0.0, config_glow: 1, particles: Vec::with_capacity(4000), core_angles, core_configs, surface, surface_config, instance_buffer, uniform_buffer, uniform_bind_group, shared_resources, win_w, win_h, monitor_rect, monitor_total_rect, wp_offset_scale: [0.0; 4], core_flicker_timers: [0.0; NUM_CORES], core_flicker_durations: [1.0; NUM_CORES], core_flicker_targets: [[0.0; 4]; NUM_CORES], core_colors: [[0.0; 4]; NUM_CORES], offset_x: 0.0, offset_y: 0.0 };
         renderer.update_wp_mapping(); renderer
     }
 
@@ -547,7 +547,7 @@ impl Renderer {
     }
 
     pub fn draw(&mut self, _device: &wgpu::Device, queue: &wgpu::Queue, color_preset: crate::app::ColorPreset, bg_effect_enabled: bool) {
-        let scale = (self.height as f32 / 1080.0).max(0.2); let (cx, cy) = (self.width as f32 * 0.5, self.height as f32 * 0.5);
+        let scale = (self.height as f32 / 1080.0).max(0.2); let (cx, cy) = (self.width as f32 * 0.5 + self.offset_x, self.height as f32 * 0.5 + self.offset_y);
         let load_f = self.smoothed_load * 0.01; let base_r = (60.0 + 90.0 * load_f) * scale;
         let mut instances = Vec::with_capacity((NUM_CORES + self.particles.len() + 2).min(MAX_INSTANCES)); let mut rng = rand::thread_rng();
         let bg_effect_intensity = if self.smoothed_load > 60.0 { ((self.smoothed_load - 60.0) * 0.025).min(1.0) } else { 0.0 };
