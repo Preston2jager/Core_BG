@@ -18,6 +18,22 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 static mut APP_PTR: *mut WallpaperApp = std::ptr::null_mut();
+static mut ADJUST_HWND: HWND = 0;
+
+const TRACKBAR_CLASS: &str = "msctls_trackbar32";
+const TBM_SETRANGE: u32 = WM_USER + 3;
+const TBM_SETPOS: u32 = WM_USER + 5;
+const TBM_GETPOS: u32 = WM_USER + 0;
+const TBS_HORZ: u32 = 0x0000;
+const TBS_AUTOTICKS: u32 = 0x0001;
+const BS_PUSHBUTTON: u32 = 0x00000000;
+const SS_LEFT: u32 = 0x00000000;
+
+
+#[link(name = "Comctl32")]
+extern "system" {
+    fn InitCommonControls();
+}
 
 #[link(name = "User32")]
 #[link(name = "Gdi32")]
@@ -133,43 +149,16 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM
                 }
                 tray::ID_SET_OFFSET => {
                     log_msg("Menu: Set Position Offset clicked");
-                    std::thread::spawn(move || {
-                        let (current_x, current_y) = {
-                            let state = STATE.lock().unwrap();
-                            (state.offset_x, state.offset_y)
-                        };
-                        let cmd_str = format!(
-                            "[void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic'); \
-                             $res = [Microsoft.VisualBasic.Interaction]::InputBox('Enter position offset as X,Y (relative to screen center 0,0):', 'Set Position Offset', '{},{}'); \
-                             if ($res) {{ Write-Output $res }}",
-                            current_x, current_y
-                        );
-                        let output = std::process::Command::new("powershell")
-                            .args(&["-Command", &cmd_str])
-                            .creation_flags(CREATE_NO_WINDOW)
-                            .stdout(std::process::Stdio::piped())
-                            .output();
-                        if let Ok(out) = output {
-                            let text = String::from_utf8_lossy(&out.stdout);
-                            let trimmed = text.trim();
-                            if !trimmed.is_empty() {
-                                let parts: Vec<&str> = trimmed.split(',').collect();
-                                if parts.len() == 2 {
-                                    if let (Ok(x), Ok(y)) = (parts[0].trim().parse::<f32>(), parts[1].trim().parse::<f32>()) {
-                                        let mut state = STATE.lock().unwrap();
-                                        state.offset_x = x;
-                                        state.offset_y = y;
-                                        app::save_settings(&state);
-                                        log_msg(&format!("Offsets updated to X: {}, Y: {}", x, y));
-                                    } else {
-                                        log_msg(&format!("Failed to parse offsets from input: {}", trimmed));
-                                    }
-                                } else {
-                                    log_msg(&format!("Invalid format for offsets input: {}", trimmed));
-                                }
-                            }
+                    unsafe {
+                        if ADJUST_HWND != 0 && IsWindow(ADJUST_HWND) != 0 {
+                            ShowWindow(ADJUST_HWND, SW_SHOW);
+                            SetForegroundWindow(ADJUST_HWND);
+                        } else {
+                            std::thread::spawn(move || {
+                                create_adjuster_window();
+                            });
                         }
-                    });
+                    }
                 }
                 tray::ID_OPEN_FOLDER => {
                     log_msg("Menu: Open Settings Folder clicked");
@@ -493,4 +482,211 @@ fn main() {
         windows_sys::Win32::Media::timeEndPeriod(1);
     }
     log_msg("Application terminated cleanly");
+}
+
+fn make_lparam(min: i16, max: i16) -> LPARAM {
+    (((max as u16 as u32) << 16) | (min as u16 as u32)) as LPARAM
+}
+
+static mut H_LABEL_X: HWND = 0;
+static mut H_SLIDER_X: HWND = 0;
+static mut H_LABEL_Y: HWND = 0;
+static mut H_SLIDER_Y: HWND = 0;
+static mut H_RESET: HWND = 0;
+
+const ID_LABEL_X: usize = 2001;
+const ID_SLIDER_X: usize = 2002;
+const ID_LABEL_Y: usize = 2003;
+const ID_SLIDER_Y: usize = 2004;
+const ID_RESET: usize = 2005;
+
+unsafe extern "system" fn adjust_wnd_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match message {
+        WM_CREATE => {
+            let (cx, cy) = {
+                let state = STATE.lock().unwrap();
+                (state.offset_x, state.offset_y)
+            };
+            
+            let h_inst = GetModuleHandleW(std::ptr::null());
+            
+            H_LABEL_X = CreateWindowExW(
+                0,
+                to_wide("STATIC").as_ptr(),
+                to_wide(&format!("Horizontal Offset (X): {}", cx as i32)).as_ptr(),
+                WS_CHILD | WS_VISIBLE | SS_LEFT as u32,
+                20, 15, 360, 20,
+                hwnd,
+                ID_LABEL_X as HMENU,
+                h_inst,
+                std::ptr::null(),
+            );
+            
+            H_SLIDER_X = CreateWindowExW(
+                0,
+                to_wide(TRACKBAR_CLASS).as_ptr(),
+                std::ptr::null(),
+                WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_AUTOTICKS as u32,
+                20, 35, 360, 30,
+                hwnd,
+                ID_SLIDER_X as HMENU,
+                h_inst,
+                std::ptr::null(),
+            );
+            
+            H_LABEL_Y = CreateWindowExW(
+                0,
+                to_wide("STATIC").as_ptr(),
+                to_wide(&format!("Vertical Offset (Y): {}", cy as i32)).as_ptr(),
+                WS_CHILD | WS_VISIBLE | SS_LEFT as u32,
+                20, 75, 360, 20,
+                hwnd,
+                ID_LABEL_Y as HMENU,
+                h_inst,
+                std::ptr::null(),
+            );
+            
+            H_SLIDER_Y = CreateWindowExW(
+                0,
+                to_wide(TRACKBAR_CLASS).as_ptr(),
+                std::ptr::null(),
+                WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_AUTOTICKS as u32,
+                20, 95, 360, 30,
+                hwnd,
+                ID_SLIDER_Y as HMENU,
+                h_inst,
+                std::ptr::null(),
+            );
+            
+            H_RESET = CreateWindowExW(
+                0,
+                to_wide("BUTTON").as_ptr(),
+                to_wide("Reset to Center (0, 0)").as_ptr(),
+                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON as u32,
+                120, 140, 160, 30,
+                hwnd,
+                ID_RESET as HMENU,
+                h_inst,
+                std::ptr::null(),
+            );
+            
+            SendMessageW(H_SLIDER_X, TBM_SETRANGE, 1, make_lparam(-1920, 1920));
+            SendMessageW(H_SLIDER_Y, TBM_SETRANGE, 1, make_lparam(-1080, 1080));
+            
+            SendMessageW(H_SLIDER_X, TBM_SETPOS, 1, cx as i32 as LPARAM);
+            SendMessageW(H_SLIDER_Y, TBM_SETPOS, 1, cy as i32 as LPARAM);
+            
+            0
+        }
+        WM_HSCROLL => {
+            let control_hwnd = lparam as HWND;
+            if control_hwnd == H_SLIDER_X {
+                let pos = SendMessageW(H_SLIDER_X, TBM_GETPOS, 0, 0) as i32;
+                {
+                    let mut state = STATE.lock().unwrap();
+                    state.offset_x = pos as f32;
+                }
+                SetWindowTextW(H_LABEL_X, to_wide(&format!("Horizontal Offset (X): {}", pos)).as_ptr());
+            } else if control_hwnd == H_SLIDER_Y {
+                let pos = SendMessageW(H_SLIDER_Y, TBM_GETPOS, 0, 0) as i32;
+                {
+                    let mut state = STATE.lock().unwrap();
+                    state.offset_y = pos as f32;
+                }
+                SetWindowTextW(H_LABEL_Y, to_wide(&format!("Vertical Offset (Y): {}", pos)).as_ptr());
+            }
+            0
+        }
+        WM_COMMAND => {
+            let id = (wparam & 0xFFFF) as usize;
+            if id == ID_RESET {
+                {
+                    let mut state = STATE.lock().unwrap();
+                    state.offset_x = 0.0;
+                    state.offset_y = 0.0;
+                    app::save_settings(&state);
+                }
+                SendMessageW(H_SLIDER_X, TBM_SETPOS, 1, 0);
+                SendMessageW(H_SLIDER_Y, TBM_SETPOS, 1, 0);
+                SetWindowTextW(H_LABEL_X, to_wide("Horizontal Offset (X): 0").as_ptr());
+                SetWindowTextW(H_LABEL_Y, to_wide("Vertical Offset (Y): 0").as_ptr());
+                log_msg("Offsets reset to X: 0, Y: 0");
+            }
+            0
+        }
+        WM_DESTROY => {
+            {
+                let state = STATE.lock().unwrap();
+                app::save_settings(&state);
+            }
+            ADJUST_HWND = 0;
+            PostQuitMessage(0);
+            0
+        }
+        _ => DefWindowProcW(hwnd, message, wparam, lparam),
+    }
+}
+
+unsafe fn create_adjuster_window() {
+    InitCommonControls();
+    
+    let hinstance = GetModuleHandleW(std::ptr::null());
+    let class_name = to_wide("StarCorePositionControl");
+    
+    let wc = WNDCLASSW {
+        style: CS_HREDRAW | CS_VREDRAW,
+        lpfnWndProc: Some(adjust_wnd_proc),
+        cbClsExtra: 0,
+        cbWndExtra: 0,
+        hInstance: hinstance,
+        hIcon: LoadIconW(0, IDI_APPLICATION),
+        hCursor: LoadCursorW(0, IDC_ARROW),
+        hbrBackground: 15 as HBRUSH, // COLOR_3DFACE
+        lpszMenuName: std::ptr::null(),
+        lpszClassName: class_name.as_ptr(),
+    };
+    
+    RegisterClassW(&wc);
+    
+    let screen_w = GetSystemMetrics(0); // SM_CXSCREEN
+    let screen_h = GetSystemMetrics(1); // SM_CYSCREEN
+    let win_w = 420;
+    let win_h = 230;
+    let pos_x = (screen_w - win_w) / 2;
+    let pos_y = (screen_h - win_h) / 2;
+    
+    let hwnd = CreateWindowExW(
+        0x00000008, // WS_EX_TOPMOST
+        class_name.as_ptr(),
+        to_wide("StarCore Position Adjustment").as_ptr(),
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        pos_x,
+        pos_y,
+        win_w,
+        win_h,
+        0,
+        0,
+        hinstance,
+        std::ptr::null(),
+    );
+    
+    if hwnd != 0 {
+        ADJUST_HWND = hwnd;
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
+        
+        let mut msg = MSG {
+            hwnd: 0,
+            message: 0,
+            wParam: 0,
+            lParam: 0,
+            time: 0,
+            pt: POINT { x: 0, y: 0 },
+        };
+        
+        while GetMessageW(&mut msg, 0, 0, 0) != 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
 }

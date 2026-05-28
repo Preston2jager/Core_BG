@@ -551,7 +551,9 @@ impl Renderer {
         let load_f = self.smoothed_load * 0.01; let base_r = (60.0 + 90.0 * load_f) * scale;
         let mut instances = Vec::with_capacity((NUM_CORES + self.particles.len() + 2).min(MAX_INSTANCES)); let mut rng = rand::thread_rng();
         let bg_effect_intensity = if self.smoothed_load > 60.0 { ((self.smoothed_load - 60.0) * 0.025).min(1.0) } else { 0.0 };
-        instances.push(GpuInstance { pos: [cx, cy, -499.0], color: self.wp_offset_scale, size: 1.0, p_type: 4.0, orbit_u: [0.0; 3], orbit_v: [0.0; 3], angle: 0.0 });
+        let wp_cx = self.width as f32 * 0.5;
+        let wp_cy = self.height as f32 * 0.5;
+        instances.push(GpuInstance { pos: [wp_cx, wp_cy, -499.0], color: self.wp_offset_scale, size: 1.0, p_type: 4.0, orbit_u: [0.0; 3], orbit_v: [0.0; 3], angle: 0.0 });
         for p in &self.particles {
             let ratio = (p.life / p.max_life).clamp(0.0, 1.0); let size = if p.p_type == 0.0 { 7.5 * scale * ratio } else { 1.8 * scale * ratio }; let alpha = if p.p_type == 0.0 { ratio * 0.7 } else { ratio * 0.9 };
             let (mut jx, mut jy, mut jz) = (0.0, 0.0, 0.0); if p.p_type == 1.0 { let jit = scale; jx = rng.gen_range(-jit..jit); jy = rng.gen_range(-jit..jit); jz = rng.gen_range(-jit..jit); }

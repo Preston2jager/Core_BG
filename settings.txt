@@ -2,3 +2,5 @@ color_preset=CrimsonNova
 fps=60
 glow=2
 bg_effect_enabled=true
+offset_x=0
+offset_y=0
