@@ -21,6 +21,7 @@ struct SshConfig {
     user: String,
     port: u16,
     key_path: String,
+    password: String,
     remote_command: String,
     ssh_command: Option<String>,
 }
@@ -57,16 +58,44 @@ impl GpuSshMonitor {
                 
                 log_msg(&format!("GPU SSH Monitor: Attempting connection to {}@{}", config.user, config.host));
                 
-                let mut child = match spawn_ssh_process(&config) {
+                let mut askpass_path = None;
+                if !config.password.is_empty() {
+                    let temp_path = std::env::current_dir()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                        .join("askpass_temp.bat");
+                    
+                    if let Ok(mut f) = File::create(&temp_path) {
+                        let content = format!("@echo off\necho {}\n", config.password);
+                        let _ = f.write_all(content.as_bytes());
+                        askpass_path = Some(temp_path);
+                    }
+                }
+
+                let mut child = match spawn_ssh_process(&config, askpass_path.as_ref()) {
                     Ok(child) => child,
                     Err(e) => {
                         log_msg(&format!("GPU SSH Monitor: Failed to spawn SSH process: {}. Retrying in 5 seconds...", e));
+                        if let Some(ref path) = askpass_path {
+                            let _ = std::fs::remove_file(path);
+                        }
                         thread::sleep(Duration::from_secs(5));
                         continue;
                     }
                 };
                 
                 log_msg("GPU SSH Monitor: SSH process spawned successfully, reading stream...");
+                
+                // Spawn a helper thread to read and log stderr messages (for diagnostic purposes)
+                if let Some(stderr) = child.stderr.take() {
+                    thread::spawn(move || {
+                        let reader = BufReader::new(stderr);
+                        for line in reader.lines() {
+                            if let Ok(text) = line {
+                                log_msg(&format!("GPU SSH Monitor [stderr]: {}", text.trim()));
+                            }
+                        }
+                    });
+                }
                 
                 if let Some(stdout) = child.stdout.take() {
                     let reader = BufReader::new(stdout);
@@ -104,6 +133,10 @@ impl GpuSshMonitor {
                 log_msg("GPU SSH Monitor: SSH stream disconnected or process exited.");
                 let _ = child.kill();
                 let _ = child.wait();
+                
+                if let Some(ref path) = askpass_path {
+                    let _ = std::fs::remove_file(path);
+                }
                 
                 if should_exit_app() {
                     break;
@@ -152,6 +185,7 @@ fn ensure_default_settings() {
 host=127.0.0.1
 user=gpumonitor
 port=22
+password=
 key_path=
 remote_command=nvidia-smi -i 0 --query-gpu=utilization.gpu --format=csv,noheader,nounits -lms 200
 
@@ -174,6 +208,7 @@ fn load_ssh_config() -> Result<SshConfig, String> {
         user: String::new(),
         port: 22,
         key_path: String::new(),
+        password: String::new(),
         remote_command: "nvidia-smi -i 0 --query-gpu=utilization.gpu --format=csv,noheader,nounits -lms 200".to_string(),
         ssh_command: None,
     };
@@ -197,6 +232,7 @@ fn load_ssh_config() -> Result<SshConfig, String> {
                     }
                 }
                 "key_path" => config.key_path = val.to_string(),
+                "password" => config.password = val.to_string(),
                 "remote_command" => config.remote_command = val.to_string(),
                 "ssh_command" => config.ssh_command = Some(val.to_string()),
                 _ => {}
@@ -207,14 +243,14 @@ fn load_ssh_config() -> Result<SshConfig, String> {
     Ok(config)
 }
 
-fn spawn_ssh_process(config: &SshConfig) -> std::io::Result<std::process::Child> {
+fn spawn_ssh_process(config: &SshConfig, askpass_path: Option<&std::path::PathBuf>) -> std::io::Result<std::process::Child> {
     if let Some(ref custom_cmd) = config.ssh_command {
         log_msg(&format!("GPU SSH Monitor: Spawning custom command: {}", custom_cmd));
         Command::new("cmd")
             .args(&["/C", custom_cmd])
             .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
     } else {
         let mut args = Vec::new();
@@ -232,8 +268,13 @@ fn spawn_ssh_process(config: &SshConfig) -> std::io::Result<std::process::Child>
         // Add default options to prevent interactive prompts where possible
         args.push("-o".to_string());
         args.push("StrictHostKeyChecking=accept-new".to_string());
+        
         args.push("-o".to_string());
-        args.push("BatchMode=yes".to_string());
+        if askpass_path.is_some() {
+            args.push("BatchMode=no".to_string());
+        } else {
+            args.push("BatchMode=yes".to_string());
+        }
         
         // User & Host
         let target = format!("{}@{}", config.user, config.host);
@@ -244,11 +285,18 @@ fn spawn_ssh_process(config: &SshConfig) -> std::io::Result<std::process::Child>
         
         log_msg(&format!("GPU SSH Monitor: Spawning ssh client with args: {:?}", args));
         
-        Command::new("ssh")
-            .args(&args)
+        let mut cmd = Command::new("ssh");
+        cmd.args(&args)
             .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
+            .stderr(Stdio::piped());
+            
+        if let Some(path) = askpass_path {
+            cmd.env("SSH_ASKPASS", path.to_str().unwrap_or(""));
+            cmd.env("SSH_ASKPASS_REQUIRE", "force");
+            cmd.env("DISPLAY", "dummy");
+        }
+        
+        cmd.spawn()
     }
 }
