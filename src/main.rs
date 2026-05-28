@@ -21,7 +21,8 @@ static mut APP_PTR: *mut WallpaperApp = std::ptr::null_mut();
 static mut ADJUST_HWND: HWND = 0;
 
 const TRACKBAR_CLASS: &str = "msctls_trackbar32";
-const TBM_SETRANGE: u32 = WM_USER + 3;
+const TBM_SETRANGEMIN: u32 = WM_USER + 7;
+const TBM_SETRANGEMAX: u32 = WM_USER + 8;
 const TBM_SETPOS: u32 = WM_USER + 5;
 const TBM_GETPOS: u32 = WM_USER + 0;
 const TBS_HORZ: u32 = 0x0000;
@@ -484,10 +485,6 @@ fn main() {
     log_msg("Application terminated cleanly");
 }
 
-fn make_lparam(min: i16, max: i16) -> LPARAM {
-    (((max as u16 as u32) << 16) | (min as u16 as u32)) as LPARAM
-}
-
 static mut H_LABEL_X: HWND = 0;
 static mut H_SLIDER_X: HWND = 0;
 static mut H_LABEL_Y: HWND = 0;
@@ -570,8 +567,10 @@ unsafe extern "system" fn adjust_wnd_proc(hwnd: HWND, message: u32, wparam: WPAR
                 std::ptr::null(),
             );
             
-            SendMessageW(H_SLIDER_X, TBM_SETRANGE, 1, make_lparam(-1920, 1920));
-            SendMessageW(H_SLIDER_Y, TBM_SETRANGE, 1, make_lparam(-1080, 1080));
+            SendMessageW(H_SLIDER_X, TBM_SETRANGEMIN, 1, -4000 as LPARAM);
+            SendMessageW(H_SLIDER_X, TBM_SETRANGEMAX, 1, 4000 as LPARAM);
+            SendMessageW(H_SLIDER_Y, TBM_SETRANGEMIN, 1, -3000 as LPARAM);
+            SendMessageW(H_SLIDER_Y, TBM_SETRANGEMAX, 1, 3000 as LPARAM);
             
             SendMessageW(H_SLIDER_X, TBM_SETPOS, 1, cx as i32 as LPARAM);
             SendMessageW(H_SLIDER_Y, TBM_SETPOS, 1, cy as i32 as LPARAM);
